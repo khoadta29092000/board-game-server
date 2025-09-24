@@ -1,0 +1,25 @@
+{
+  "dependencies": {},
+  "parameters": {
+    "SplendorGameServer20250924045201.subscriptionId": {
+      "Name": "SplendorGameServer20250924045201.subscriptionId",
+      "Type": "subscription",
+      "Value": "67376af3-f8b3-4be5-88cb-edabc57cfa15"
+    },
+    "SplendorGameServer20250924045201.resourceName": {
+      "Name": "SplendorGameServer20250924045201.resourceName",
+      "Type": null,
+      "Value": "SplendorGameServer20250924045201"
+    },
+    "SplendorGameServer20250924045201.resourceGroupLocation": {
+      "Name": "SplendorGameServer20250924045201.resourceGroupLocation",
+      "Type": null,
+      "Value": "canadacentral"
+    },
+    "SplendorGameServer20250924045201.resourceGroupName": {
+      "Name": "SplendorGameServer20250924045201.resourceGroupName",
+      "Type": "resourceGroup",
+      "Value": "boardGame"
+    }
+  }
+}

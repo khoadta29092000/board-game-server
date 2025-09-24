@@ -47,7 +47,9 @@ builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<IUserConnectionService, UserConnectionService>();
 
 //log production
+builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
+builder.Logging.AddAzureWebAppDiagnostics();
 
 //add signalR real time
 builder.Services.AddSignalR();
@@ -151,11 +153,8 @@ app.UseAuthentication();
 
 app.MapGraphQL("/graphql");
 
-app.UseEndpoints(endpoints =>
-{
-    endpoints.MapHub<RoomHub>("/roomHub");
-    endpoints.MapControllers(); 
-});
+app.MapControllers();
+app.MapHub<RoomHub>("/roomHub");
 
 app.MapControllers();
 

@@ -76,7 +76,7 @@ namespace Splendor_Game_Server.Controllers
             }
             catch (NotVerifiedException ex)
             {
-                return StatusCode(403, new { status = 402, code = "NotVerified", message = ex.Message });
+                return StatusCode(402, new { status = 402, code = "NotVerified", message = ex.Message });
             }
             catch (NotActiveException ex)
             {
@@ -96,8 +96,8 @@ namespace Splendor_Game_Server.Controllers
                 if (codePlayer is null)
                 { return StatusCode(400, new { StatusCode = 400, Message = "Verification code validation failed." }); }
                 await playerService.VerifyAccount(codePlayer, newVerify.Code);
-
-                return Ok(new { StatusCode = 200, Message = "Verify Player succedfully" });
+                Player? customer = await playerService.GetMemberByUsername(newVerify.Username);
+                return Ok(new { StatusCode = 200, Message = "Verify Player succedfully", data = newVerify.Mode == "login" ? securityUtility.GenerateToken(customer) : "" });
             }
             catch (Exception ex)
             {
@@ -119,7 +119,7 @@ namespace Splendor_Game_Server.Controllers
                 }
 
                 await playerService.VerifyAccount(codePlayer, newVerify.Code);
-              
+
                 var saltPassword = securityUtility.GenerateSalt();
                 var hashPassword = securityUtility.GenerateHashedPassword(newVerify.NewPassword, saltPassword);
                 await playerService.ChangePassword(player.Id, hashPassword, saltPassword);
@@ -259,7 +259,7 @@ namespace Splendor_Game_Server.Controllers
                 var saltPassword = securityUtility.GenerateSalt();
                 var hashPassword = securityUtility.GenerateHashedPassword(player.Password, saltPassword);
                 string verificationCode = securityUtility.GenerateVerificationCode();
-               
+
                 var newPlayer = new Player
                 {
                     Id = Id,
@@ -420,14 +420,14 @@ namespace Splendor_Game_Server.Controllers
                 return StatusCode(400, new { StatusCode = 400, Message = ex.Message });
             }
         }
-        [HttpPut("ChangePassword")]
+        [HttpPut("Change_Password")]
         [Authorize]
         public async Task<IActionResult> ChangPassword(ChangePasswordPlayer player)
         {
             try
             {
-                string palyerId = User.FindFirst("Id")?.Value;
-                Player oldPlayer = await playerService.GetMemberById(palyerId);
+                string? palyerId = User.FindFirst("Id")?.Value;
+                Player? oldPlayer = await playerService.GetMemberById(palyerId);
                 var saltPassword = securityUtility.GenerateSalt();
                 var hashPassword = securityUtility.GenerateHashedPassword(player.OldPassword, saltPassword);
                 if (oldPlayer.HashedPassword == null)
@@ -444,6 +444,32 @@ namespace Splendor_Game_Server.Controllers
                     await playerService.ChangePassword(palyerId, hashPassword, saltPassword);
                     return Ok(new { StatusCode = 200, Message = "ChangePassword successful" });
                 }
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(400, new { StatusCode = 400, Message = ex.Message });
+            }
+        }
+        [HttpGet("Get_Profile")]
+        [Authorize]
+        public async Task<IActionResult> GetProfile()
+        {
+            try
+            {
+                string? palyerId = User.FindFirst("Id")?.Value;
+                Player? oldPlayer = await playerService.GetMemberById(palyerId);
+
+                return Ok(new
+                {
+                    StatusCode = 200,
+                    Message = "load successful",
+                    data = new
+                    {
+                        Id = oldPlayer?.Id ?? "",
+                        Name = oldPlayer?.Name ?? "",
+                        Username = oldPlayer?.Username ?? ""
+                    }
+                });
             }
             catch (Exception ex)
             {

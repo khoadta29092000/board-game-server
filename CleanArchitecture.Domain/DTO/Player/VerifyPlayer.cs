@@ -10,6 +10,8 @@ namespace CleanArchitecture.Domain.DTO.Player
     {
         public string Username { get; set; }
         public string Code { get; set; }
+
+        public string Mode { get; set; }
     }
    
 }

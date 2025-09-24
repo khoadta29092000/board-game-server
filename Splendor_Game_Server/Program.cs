@@ -150,6 +150,11 @@ app.MapGraphQL("/graphql");
 
 app.MapHub<RoomHub>("/roomHub");
 
+app.UseEndpoints(endpoints =>
+{
+    endpoints.MapHub<RoomHub>("/roomHub");
+});
+
 app.MapControllers();
 
 app.Run();

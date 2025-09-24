@@ -46,6 +46,9 @@ builder.Services.AddSingleton<IRoomRepository, RoomRepository>();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<IUserConnectionService, UserConnectionService>();
 
+//log production
+builder.Logging.AddConsole();
+
 //add signalR real time
 builder.Services.AddSignalR();
 
@@ -138,21 +141,20 @@ if (app.Environment.IsDevelopment())
     app.UseDeveloperExceptionPage();
 }
 
-app.UseAuthentication();
+app.UseRouting();
 
 app.UseHttpsRedirection();
 
-app.UseRouting();
-
 app.UseAuthorization();
 
-app.MapGraphQL("/graphql");
+app.UseAuthentication();
 
-app.MapHub<RoomHub>("/roomHub");
+app.MapGraphQL("/graphql");
 
 app.UseEndpoints(endpoints =>
 {
     endpoints.MapHub<RoomHub>("/roomHub");
+    endpoints.MapControllers(); 
 });
 
 app.MapControllers();

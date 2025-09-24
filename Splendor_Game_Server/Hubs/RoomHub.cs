@@ -1,5 +1,4 @@
-﻿using Amazon.Runtime.Internal;
-using CleanArchitecture.Application.IService;
+﻿using CleanArchitecture.Application.IService;
 using CleanArchitecture.Domain.Model.Room;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
@@ -11,10 +10,16 @@ namespace CleanArchitecture.Presentation.Hubs
     {
         private readonly IRoomService _roomService;
         private readonly IUserConnectionService _userConnectionService;
-        public RoomHub(IRoomService roomService, IUserConnectionService userConnectionService)
+        private readonly ILogger<RoomHub> _logger;
+
+        public RoomHub(
+            IRoomService roomService,
+            IUserConnectionService userConnectionService,
+            ILogger<RoomHub> logger)
         {
             _roomService = roomService;
             _userConnectionService = userConnectionService;
+            _logger = logger;
         }
 
         private (string? playerId, string? playerName) GetPlayerInfo()
@@ -24,47 +29,77 @@ namespace CleanArchitecture.Presentation.Hubs
 
             if (string.IsNullOrEmpty(playerId) || string.IsNullOrEmpty(playerName))
             {
+                _logger.LogWarning("⚠️ Invalid player info. ConnectionId: {ConnectionId}", Context.ConnectionId);
                 return (null, null);
             }
+
             return (playerId, playerName);
         }
 
-        // 1. Join Room List Group để nhận updates về danh sách phòng
+        public override async Task OnConnectedAsync()
+        {
+            var user = Context.User?.Identity?.Name ?? "Anonymous";
+            _logger.LogInformation("🔌 Client connected: {ConnectionId}, User: {User}", Context.ConnectionId, user);
+
+            await base.OnConnectedAsync();
+        }
+
+        public override async Task OnDisconnectedAsync(Exception? exception)
+        {
+            _logger.LogWarning("❌ Client disconnected: {ConnectionId}, Reason: {Reason}",
+                Context.ConnectionId, exception?.Message);
+
+            await base.OnDisconnectedAsync(exception);
+        }
+
+        // 1. Join Room List Group
         public async Task JoinRoomListGroup()
         {
+            _logger.LogInformation("➡️ {ConnectionId} joined RoomList group", Context.ConnectionId);
             await Groups.AddToGroupAsync(Context.ConnectionId, "RoomList");
         }
 
         public async Task LeaveRoomListGroup()
         {
+            _logger.LogInformation("↩️ {ConnectionId} left RoomList group", Context.ConnectionId);
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, "RoomList");
         }
 
-        // 2. Get Active Rooms - thay thế API
+        // 2. Get Active Rooms
         public async Task GetActiveRooms()
         {
             try
             {
+                _logger.LogInformation("📥 GetActiveRooms called by {ConnectionId}", Context.ConnectionId);
+
                 var rooms = await _roomService.GetActiveRoom();
+
+                _logger.LogInformation("📦 Found {RoomCount} active rooms", rooms.Count());
+
                 await Clients.Caller.SendAsync("ActiveRoomsLoaded", rooms);
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "❌ Failed to get active rooms. ConnectionId: {ConnectionId}", Context.ConnectionId);
                 await Clients.Caller.SendAsync("Error", $"can't loading rooms: {ex.Message}");
-               
             }
         }
-        //3. Tạo Phòng mới
+
+        // 3. Create Room
         public async Task CreateRoom()
         {
             try
             {
                 var (playerId, playerName) = GetPlayerInfo();
+                _logger.LogInformation("➡️ CreateRoom called by {PlayerId} - {PlayerName}", playerId, playerName);
+
                 if (playerId == null)
                 {
+                    _logger.LogWarning("⚠️ Unauthorized CreateRoom attempt. ConnectionId: {ConnectionId}", Context.ConnectionId);
                     await Clients.Caller.SendAsync("Error", "Unauthorized: Invalid token");
                     return;
                 }
+
                 var room = new Room
                 {
                     CurrentPlayers = 1,
@@ -72,90 +107,86 @@ namespace CleanArchitecture.Presentation.Hubs
                     Id = "room_" + playerName,
                     Players = new List<RoomPlayer>
                     {
-                        new RoomPlayer
-                        {
-                          IsOwner = true,
-                          Name = playerName!,
-                          PlayerId = playerId!
-                        }
+                        new RoomPlayer { IsOwner = true, Name = playerName!, PlayerId = playerId! }
                     },
                     RoomType = RoomType.Public,
                     Status = RoomStatus.Waiting
                 };
-                await _roomService.CreateRoom(room);
-                // Track connection mapping
-                await _userConnectionService.AddUserConnection(playerId, Context.ConnectionId, room.Id);
 
-                // Add creator to room group
+                await _roomService.CreateRoom(room);
+                await _userConnectionService.AddUserConnection(playerId, Context.ConnectionId, room.Id);
                 await Groups.AddToGroupAsync(Context.ConnectionId, $"Room_{room.Id}");
 
-                // Notify caller về phòng vừa tạo
-                await Clients.Caller.SendAsync("RoomCreated", new { room, success = true });
+                _logger.LogInformation("✅ Room created: {RoomId} by {PlayerName}", room.Id, playerName);
 
-                // Notify cho room list về update (phòng mới được tạo)
-                await Clients.Group("RoomList")
-                    .SendAsync("RoomUpdated", room);
+                await Clients.Caller.SendAsync("RoomCreated", new { room, success = true });
+                await Clients.Group("RoomList").SendAsync("RoomUpdated", room);
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "❌ Error in CreateRoom for ConnectionId: {ConnectionId}", Context.ConnectionId);
                 await Clients.Caller.SendAsync("Error", $"can't create room: {ex.Message}");
             }
         }
+
         // 4. Join Room
         public async Task JoinRoom(string roomId)
         {
             try
             {
                 var (playerId, playerName) = GetPlayerInfo();
+                _logger.LogInformation("➡️ JoinRoom {RoomId} called by {PlayerId} - {PlayerName}", roomId, playerId, playerName);
+
                 if (playerId == null)
                 {
+                    _logger.LogWarning("⚠️ Unauthorized JoinRoom attempt. ConnectionId: {ConnectionId}", Context.ConnectionId);
                     await Clients.Caller.SendAsync("Error", "Unauthorized: Invalid token");
                     return;
                 }
+
                 var room = await _roomService.GetRoomById(roomId);
                 if (room == null)
                 {
+                    _logger.LogWarning("⚠️ Room {RoomId} not found. Player: {PlayerId}", roomId, playerId);
                     await Clients.Caller.SendAsync("Error", "Room not found");
                     return;
                 }
                 if (room.Status != RoomStatus.Waiting)
                 {
+                    _logger.LogWarning("⚠️ Room {RoomId} already started. Player: {PlayerId}", roomId, playerId);
                     await Clients.Caller.SendAsync("Error", "Game has already started in this room");
                     return;
                 }
                 if (room.CurrentPlayers >= room.QuantityPlayer)
                 {
+                    _logger.LogWarning("⚠️ Room {RoomId} is full. Player: {PlayerId}", roomId, playerId);
                     await Clients.Caller.SendAsync("Error", "Room is full");
                     return;
                 }
                 if (room.Players.Any(p => p.PlayerId == playerId))
                 {
+                    _logger.LogWarning("⚠️ Player {PlayerId} already in Room {RoomId}", playerId, roomId);
                     await Clients.Caller.SendAsync("Error", "You are already in this room");
                     return;
                 }
+
                 await _roomService.JoinRoom(roomId, playerId, playerName);
-
-                // Track connection mapping
                 await _userConnectionService.AddUserConnection(playerId, Context.ConnectionId, room.Id);
-
-                // Add to room group
                 await Groups.AddToGroupAsync(Context.ConnectionId, $"Room_{room.Id}");
 
                 var updatedRoom = await _roomService.GetRoomById(roomId);
 
-                // Notify cho người vừa join
+                _logger.LogInformation("✅ Player {PlayerId} joined Room {RoomId}. Current players: {Count}", playerId, roomId, updatedRoom?.CurrentPlayers);
+
                 await Clients.Caller.SendAsync("JoinedRoom", new { room = updatedRoom, success = true });
-
-                // Notify cho tất cả người trong room (trừ người vừa join)
                 await Clients.GroupExcept($"Room_{roomId}", Context.ConnectionId)
-                 .SendAsync("PlayerJoined", new { playerId, playerName, room = updatedRoom });
+                    .SendAsync("PlayerJoined", new { playerId, playerName, room = updatedRoom });
 
-                // Notify cho room list về update
-                await Clients.Group("RoomList")
-                    .SendAsync("RoomUpdated", updatedRoom);
+                await Clients.Group("RoomList").SendAsync("RoomUpdated", updatedRoom);
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "❌ Error in JoinRoom {RoomId} for Player {PlayerId}", roomId, Context.User?.Identity?.Name);
                 await Clients.Caller.SendAsync("Error", $"can't join room: {ex.Message}");
             }
         }

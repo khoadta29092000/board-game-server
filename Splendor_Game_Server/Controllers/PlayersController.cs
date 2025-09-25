@@ -31,7 +31,7 @@ namespace Splendor_Game_Server.Controllers
         }
 
         [HttpGet]
-        // [Authorize]
+        //[Authorize]
         public async Task<IActionResult> GetAll()
         {
             try

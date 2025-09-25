@@ -17,6 +17,9 @@ namespace CleanArchitecture.Application.Service
 
         public async Task AddUserConnection(string playerId, string connectionId, string roomId)
         {
+            // Remove any existing connection for this connectionId first
+            await RemoveConnection(connectionId);
+
             // Lưu mapping: connectionId -> UserConnection
             var userConnection = new UserConnection
             {
@@ -25,7 +28,6 @@ namespace CleanArchitecture.Application.Service
                 RoomId = roomId,
                 ConnectedAt = DateTime.UtcNow
             };
-
             _cache.Set($"{CONNECTION_PREFIX}{connectionId}", userConnection, TimeSpan.FromHours(24));
 
             // Lưu mapping: playerId -> List<connectionId>
@@ -86,10 +88,48 @@ namespace CleanArchitecture.Application.Service
             return await Task.FromResult(connections);
         }
 
-        public async Task<UserConnection> GetUserByConnection(string connectionId)
+        public async Task<UserConnection?> GetUserByConnection(string connectionId)
         {
             var connection = _cache.Get<UserConnection>($"{CONNECTION_PREFIX}{connectionId}");
             return await Task.FromResult(connection);
+        }
+
+        public async Task<bool> IsUserInRoom(string playerId, string roomId)
+        {
+            var userConnections = await GetUserConnections(playerId);
+            foreach (var connectionId in userConnections)
+            {
+                var connection = _cache.Get<UserConnection>($"{CONNECTION_PREFIX}{connectionId}");
+                if (connection?.RoomId == roomId)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public async Task<List<string>> GetUsersInRoom(string roomId)
+        {
+            var usersInRoom = new List<string>();
+
+            // This is not the most efficient way, but works for smaller scale
+            // For production, consider using Redis with better data structures
+            var allUserKeys = new List<string>();
+
+            // Note: IMemoryCache doesn't provide a way to enumerate keys
+            // This is a limitation. In production, consider using Redis instead
+            // For now, we'll return empty list and rely on database state
+
+            return await Task.FromResult(usersInRoom);
+        }
+
+        public async Task RemoveAllConnectionsForUser(string playerId)
+        {
+            var userConnections = await GetUserConnections(playerId);
+            foreach (var connectionId in userConnections)
+            {
+                await RemoveConnection(connectionId);
+            }
         }
     }
 }

@@ -1,11 +1,9 @@
-﻿using Amazon;
-using CleanArchitecture.Application.GraphQL;
+﻿using CleanArchitecture.Application.GraphQL;
 using CleanArchitecture.Application.IRepository;
 using CleanArchitecture.Application.IService;
 using CleanArchitecture.Application.Repository;
 using CleanArchitecture.Application.Service;
 using CleanArchitecture.Domain.Model;
-using CleanArchitecture.Domain.Model.Player;
 using CleanArchitecture.Infrastructure.Repository;
 using CleanArchitecture.Infrastructure.Security;
 using CleanArchitecture.Presentation.Hubs;
@@ -58,7 +56,7 @@ builder.Services.AddGraphQLServer()
                 .AddType<PlayerType>();
 
 var configuration = builder.Configuration;
-var secretKey = configuration["Appsettings:SecretKey"];
+var secretKey = configuration["Appsettings:SecretKey"] ?? string.Empty;
 var secretKeyBytes = Encoding.UTF8.GetBytes(secretKey);
 builder.Services.AddAuthorization();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
@@ -119,13 +117,6 @@ builder.Services.AddEndpointsApiExplorer();
 
 var app = builder.Build();
 
-app.UseCors(policy => policy
-    .AllowAnyHeader()
-    .AllowAnyMethod()
-    .AllowCredentials()
-    .SetIsOriginAllowed(_ => true) 
-);
-
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
 {
@@ -144,16 +135,24 @@ if (app.Environment.IsDevelopment())
 
 app.UseRouting();
 
+app.UseCors(policy => policy
+    .AllowAnyHeader()
+    .AllowAnyMethod()
+    .AllowCredentials()
+    .SetIsOriginAllowed(_ => true)
+);
+
+
 app.UseHttpsRedirection();
 
 app.UseAuthentication();
 
 app.UseAuthorization();
 
-app.MapGraphQL("/graphql");
-
 app.MapControllers();
+
 app.MapHub<RoomHub>("/roomHub");
+app.MapGraphQL("/graphql");
 
 app.MapControllers();
 

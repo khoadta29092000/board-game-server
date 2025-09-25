@@ -1,21 +1,20 @@
-﻿using CleanArchitecture.Application.Service;
-using CleanArchitecture.Infrastructure.Repository;
+﻿using Amazon;
+using CleanArchitecture.Application.GraphQL;
+using CleanArchitecture.Application.IRepository;
 using CleanArchitecture.Application.IService;
 using CleanArchitecture.Application.Repository;
-using static Microsoft.EntityFrameworkCore.DbLoggerCategory;
+using CleanArchitecture.Application.Service;
+using CleanArchitecture.Domain.Model;
 using CleanArchitecture.Domain.Model.Player;
-using Amazon;
-using CleanArchitecture.Application.GraphQL;
+using CleanArchitecture.Infrastructure.Repository;
+using CleanArchitecture.Infrastructure.Security;
+using CleanArchitecture.Presentation.Hubs;
 using GraphQL;
-using GraphQL.Types;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
-using CleanArchitecture.Infrastructure.Security;
-using CleanArchitecture.Domain.Model;
-using CleanArchitecture.Application.IRepository;
-using CleanArchitecture.Presentation.Hubs;
+using Newtonsoft.Json.Converters;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -29,10 +28,10 @@ builder.Services.AddCors(c =>
 builder.Services.AddControllers()
     .AddNewtonsoftJson(options =>
     {
+        options.SerializerSettings.Converters.Add(new StringEnumConverter());
         options.SerializerSettings.ReferenceLoopHandling = Newtonsoft.Json.ReferenceLoopHandling.Ignore;
-        // Thêm các cấu hình khác theo nhu cầu của bạn
     });
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddAWSLambdaHosting(LambdaEventSource.HttpApi);
 
@@ -147,9 +146,9 @@ app.UseRouting();
 
 app.UseHttpsRedirection();
 
-app.UseAuthorization();
-
 app.UseAuthentication();
+
+app.UseAuthorization();
 
 app.MapGraphQL("/graphql");
 

@@ -1,14 +1,21 @@
 ﻿using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Converters;
 
 namespace CleanArchitecture.Domain.Model.Room
 {
     public class Room
     {
-        [BsonElement("roomId")]
+        [BsonId]
+        [BsonRepresentation(BsonType.ObjectId)]
         public string Id { get; set; }
+        [BsonElement("roomId")]
+        public string RoomId { get; set; }
 
         [BsonElement("roomType")]
+        [BsonRepresentation(BsonType.String)]
+        [JsonConverter(typeof(JsonStringEnumConverter))]
         public RoomType RoomType { get; set; } = RoomType.Public;
 
         [BsonElement("quantityPlayer")]
@@ -22,6 +29,7 @@ namespace CleanArchitecture.Domain.Model.Room
 
         [BsonElement("status")]
         [BsonRepresentation(BsonType.String)]
+        [JsonConverter(typeof(JsonStringEnumConverter))]
         public RoomStatus Status { get; set; } = RoomStatus.Waiting;
     }
 }

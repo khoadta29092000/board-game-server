@@ -1,7 +1,9 @@
 ﻿using CleanArchitecture.Application.IRepository;
 using CleanArchitecture.Domain.Model;
-using CleanArchitecture.Domain.Model.Room;
 using CleanArchitecture.Domain.Model.Player;
+using CleanArchitecture.Domain.Model.Room;
+using CleanArchitecture.Domain.Model.VerificationCode;
+using CleanArchitecture.Infrastructure.Security;
 using Microsoft.Extensions.Options;
 using MongoDB.Driver;
 using System;
@@ -14,20 +16,6 @@ namespace CleanArchitecture.Infrastructure.Repository
     {
         private readonly IMongoCollection<Room> _roomsCollection;
 
-        public async Task<List<Room>> GetActiveRoom()
-        {
-            var filter = Builders<Room>.Filter.And(
-                Builders<Room>.Filter.Eq(r => r.Status, RoomStatus.Waiting),
-                Builders<Room>.Filter.Eq(r => r.RoomType, RoomType.Public)
-            );
-
-            return await _roomsCollection.Find(filter).ToListAsync();
-        }
-        public async Task<Room?> GetRoomById(string roomID)
-        {
-            var filter = Builders<Room>.Filter.Eq(r => r.Id, roomID);
-            return await _roomsCollection.Find(filter).FirstOrDefaultAsync();
-        }
         public RoomRepository(IOptions<DatabaseSettings> dbSettings)
         {
             if (dbSettings == null || dbSettings.Value == null)
@@ -41,6 +29,23 @@ namespace CleanArchitecture.Infrastructure.Repository
             _roomsCollection = mongoDatabase.GetCollection<Room>(
                 dbSettings.Value.RoomsCollectionName);
         }
+
+        public async Task<List<Room>> GetActiveRoom()
+        {
+            var filter = Builders<Room>.Filter.And(
+                Builders<Room>.Filter.Eq(r => r.Status, RoomStatus.Waiting),
+                Builders<Room>.Filter.Eq(r => r.RoomType, RoomType.Public)
+            );
+
+            return await _roomsCollection.Find(filter).ToListAsync();
+            //return await _roomsCollection.Find(_ => true).ToListAsync();
+        }
+        public async Task<Room?> GetRoomById(string roomID)
+        {
+            var filter = Builders<Room>.Filter.Eq(r => r.Id, roomID);
+            return await _roomsCollection.Find(filter).FirstOrDefaultAsync();
+        }
+
 
         public async Task CreateRoom(Room room)
         {

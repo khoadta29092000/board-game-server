@@ -1,11 +1,12 @@
 ﻿using CleanArchitecture.Application.IService;
+using CleanArchitecture.Domain.Model.Player;
 using CleanArchitecture.Domain.Model.Room;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
+using MongoDB.Bson;
 
 namespace CleanArchitecture.Presentation.Hubs
 {
-    [Authorize]
     public class RoomHub : Hub
     {
         private readonly IRoomService _roomService;
@@ -20,20 +21,6 @@ namespace CleanArchitecture.Presentation.Hubs
             _roomService = roomService;
             _userConnectionService = userConnectionService;
             _logger = logger;
-        }
-
-        private (string? playerId, string? playerName) GetPlayerInfo()
-        {
-            var playerId = Context.User.FindFirst("Id")?.Value;
-            var playerName = Context.User.FindFirst("Name")?.Value;
-
-            if (string.IsNullOrEmpty(playerId) || string.IsNullOrEmpty(playerName))
-            {
-                _logger.LogWarning("⚠️ Invalid player info. ConnectionId: {ConnectionId}", Context.ConnectionId);
-                return (null, null);
-            }
-
-            return (playerId, playerName);
         }
 
         public override async Task OnConnectedAsync()
@@ -90,7 +77,9 @@ namespace CleanArchitecture.Presentation.Hubs
         {
             try
             {
-                var (playerId, playerName) = GetPlayerInfo();
+                string playerId = "123";
+                string playerName = "456";
+                string Id = ObjectId.GenerateNewId().ToString();
                 _logger.LogInformation("➡️ CreateRoom called by {PlayerId} - {PlayerName}", playerId, playerName);
 
                 if (playerId == null)
@@ -102,9 +91,10 @@ namespace CleanArchitecture.Presentation.Hubs
 
                 var room = new Room
                 {
+                    RoomId = "room_" + playerName,
                     CurrentPlayers = 1,
                     QuantityPlayer = 4,
-                    Id = "room_" + playerName,
+                    Id = Id,
                     Players = new List<RoomPlayer>
                     {
                         new RoomPlayer { IsOwner = true, Name = playerName!, PlayerId = playerId! }
@@ -134,7 +124,9 @@ namespace CleanArchitecture.Presentation.Hubs
         {
             try
             {
-                var (playerId, playerName) = GetPlayerInfo();
+                string playerId = "123";
+                string playerName = "456";
+
                 _logger.LogInformation("➡️ JoinRoom {RoomId} called by {PlayerId} - {PlayerName}", roomId, playerId, playerName);
 
                 if (playerId == null)

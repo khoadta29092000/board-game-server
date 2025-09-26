@@ -44,6 +44,42 @@ namespace CleanArchitecture.Presentation.Hubs
             await base.OnConnectedAsync();
         }
 
+        private async Task AutoLeaveRoom()
+        {
+            var userConnection = await _userConnectionService.GetUserByConnection(Context.ConnectionId);
+
+            if (userConnection != null && !string.IsNullOrEmpty(userConnection.RoomId))
+            {
+                _logger.LogInformation("🚪 Auto removing player {PlayerId} from room {RoomId} due to disconnect",
+                    userConnection.PlayerId, userConnection.RoomId);
+
+                var updatedRoom = await _roomService.LeaveRoom(userConnection.RoomId, userConnection.PlayerId);
+
+                if (updatedRoom != null)
+                {
+                    await Clients.Group($"Room_{userConnection.RoomId}")
+                        .SendAsync("PlayerLeft", new
+                        {
+                            playerId = userConnection.PlayerId,
+                            room = updatedRoom,
+                            reason = "disconnected"
+                        });
+
+                    if (updatedRoom.CurrentPlayers > 0)
+                    {
+                        await Clients.Group("RoomList").SendAsync("RoomUpdated", updatedRoom);
+                    }
+                    else
+                    {
+                        await Clients.Group("RoomList").SendAsync("RoomRemoved", userConnection.RoomId);
+                    }
+
+                    _logger.LogInformation("✅ Player {PlayerId} auto-removed from room {RoomId}. Remaining players: {Count}",
+                        userConnection.PlayerId, userConnection.RoomId, updatedRoom.CurrentPlayers);
+                }
+            }
+        }
+
         public override async Task OnDisconnectedAsync(Exception? exception)
         {
             try
@@ -51,38 +87,7 @@ namespace CleanArchitecture.Presentation.Hubs
                 _logger.LogWarning("❌ Client disconnected: {ConnectionId}, Reason: {Reason}",
                     Context.ConnectionId, exception?.Message);
 
-                var userConnection = await _userConnectionService.GetUserByConnection(Context.ConnectionId);
-
-                if (userConnection != null && !string.IsNullOrEmpty(userConnection.RoomId))
-                {
-                    _logger.LogInformation("🚪 Auto removing player {PlayerId} from room {RoomId} due to disconnect",
-                        userConnection.PlayerId, userConnection.RoomId);
-
-                    var updatedRoom = await _roomService.LeaveRoom(userConnection.RoomId, userConnection.PlayerId);
-
-                    if (updatedRoom != null)
-                    {
-                        await Clients.Group($"Room_{userConnection.RoomId}")
-                            .SendAsync("PlayerLeft", new
-                            {
-                                playerId = userConnection.PlayerId,
-                                room = updatedRoom,
-                                reason = "disconnected"
-                            });
-
-                        if (updatedRoom.CurrentPlayers > 0)
-                        {
-                            await Clients.Group("RoomList").SendAsync("RoomUpdated", updatedRoom);
-                        }
-                        else
-                        {
-                            await Clients.Group("RoomList").SendAsync("RoomRemoved", userConnection.RoomId);
-                        }
-
-                        _logger.LogInformation("✅ Player {PlayerId} auto-removed from room {RoomId}. Remaining players: {Count}",
-                            userConnection.PlayerId, userConnection.RoomId, updatedRoom.CurrentPlayers);
-                    }
-                }
+                await AutoLeaveRoom();
 
                 await _userConnectionService.RemoveConnection(Context.ConnectionId);
             }
@@ -112,6 +117,8 @@ namespace CleanArchitecture.Presentation.Hubs
             {
                 _logger.LogInformation("📥 GetActiveRooms called by {ConnectionId}", Context.ConnectionId);
 
+                await AutoLeaveRoom();
+
                 var rooms = await _roomService.GetActiveRoom();
 
                 _logger.LogInformation("📦 Found {RoomCount} active rooms", rooms.Count());
@@ -125,7 +132,7 @@ namespace CleanArchitecture.Presentation.Hubs
             }
         }
 
-        public async Task CreateRoom()
+        public async Task<object> CreateRoom()
         {
             try
             {
@@ -135,9 +142,8 @@ namespace CleanArchitecture.Presentation.Hubs
 
                 if (playerId == null)
                 {
-                    _logger.LogWarning("⚠️ Unauthorized CreateRoom attempt. ConnectionId: {ConnectionId}", Context.ConnectionId);
-                    await Clients.Caller.SendAsync("Error", "Unauthorized: Invalid token");
-                    return;
+                    _logger.LogWarning("⚠️ Unauthorized JoinRoom attempt. ConnectionId: {ConnectionId}", Context.ConnectionId);
+                    throw new HubException("Unauthorized: Invalid token");
                 }
 
                 var room = new Room
@@ -160,72 +166,102 @@ namespace CleanArchitecture.Presentation.Hubs
 
                 _logger.LogInformation("✅ Room created: {RoomId} by {PlayerName}", createdRoom.Id, playerName);
 
-                await Clients.Caller.SendAsync("RoomCreated", new { room = createdRoom, success = true });
                 await Clients.Group("RoomList").SendAsync("RoomUpdated", createdRoom);
+                return new { room = createdRoom, success = true };
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "❌ Error in CreateRoom for ConnectionId: {ConnectionId}", Context.ConnectionId);
                 await Clients.Caller.SendAsync("Error", $"can't create room: {ex.Message}");
+                throw new HubException($"Can't create room: {ex.Message}");
             }
         }
 
-        public async Task JoinRoom(string roomId)
+        public async Task<object> JoinRoom(string roomId)
         {
             try
             {
                 var (playerId, playerName) = GetPlayerInfo();
-
-                _logger.LogInformation("➡️ JoinRoom {RoomId} called by {PlayerId} - {PlayerName}", roomId, playerId, playerName);
+                _logger.LogInformation("➡️ JoinRoom {RoomId} called by {PlayerId} - {PlayerName}",
+                    roomId, playerId, playerName);
 
                 if (playerId == null)
                 {
                     _logger.LogWarning("⚠️ Unauthorized JoinRoom attempt. ConnectionId: {ConnectionId}", Context.ConnectionId);
-                    await Clients.Caller.SendAsync("Error", "Unauthorized: Invalid token");
-                    return;
+                    await Clients.Caller.SendAsync("JoinRoomError", new { error = "Unauthorized: Invalid token" });
+                    return new { success = false, error = "Unauthorized" };
                 }
 
                 var room = await _roomService.GetRoomById(roomId);
                 if (room == null)
                 {
                     _logger.LogWarning("⚠️ Room {RoomId} not found. Player: {PlayerId}", roomId, playerId);
-                    await Clients.Caller.SendAsync("Error", "Room not found");
-                    return;
+                    await Clients.Caller.SendAsync("JoinRoomError", new { error = "Room not found" });
+                    return new { success = false, error = "Room not found" };
                 }
+
                 if (room.Status != RoomStatus.Waiting)
                 {
-                    _logger.LogWarning("⚠️ Room {RoomId} already started. Player: {PlayerId}", roomId, playerId);
-                    await Clients.Caller.SendAsync("Error", "Game has already started in this room");
-                    return;
+                    await Clients.Caller.SendAsync("JoinRoomError", new { error = "Game has already started" });
+                    return new { success = false, error = "Game has already started" };
                 }
+
+                // Kiểm tra player đã trong phòng chưa TRƯỚC
+                RoomPlayer? existingPlayer = room.Players?.Find(p => p.PlayerId == playerId);
+                if (existingPlayer != null)
+                {
+                    // Player đã trong phòng - chỉ reconnect
+                    await _userConnectionService.AddUserConnection(playerId, Context.ConnectionId, room.Id);
+                    await Groups.AddToGroupAsync(Context.ConnectionId, $"Room_{room.Id}");
+                    await Clients.Caller.SendAsync("JoinedRoom", new { room, success = true });
+                    return new { room, success = true };
+                }
+
+                // Kiểm tra room full SAU khi đã check existing player
                 if (room.CurrentPlayers >= room.QuantityPlayer)
                 {
-                    _logger.LogWarning("⚠️ Room {RoomId} is full. Player: {PlayerId}", roomId, playerId);
-                    await Clients.Caller.SendAsync("Error", "Room is full");
-                    return;
+                    await Clients.Caller.SendAsync("JoinRoomError", new { error = "Room is full" });
+                    return new { success = false, error = "Room is full" };
                 }
 
-                Room updatedRoom = await _roomService.JoinRoom(roomId, playerId, playerName);
-                await _userConnectionService.AddUserConnection(playerId, Context.ConnectionId, room.Id);
-                await Groups.AddToGroupAsync(Context.ConnectionId, $"Room_{room.Id}");
+                // Join room - KHÔNG GỬI ERROR Ở ĐÂY NỮA
+                Room? updatedRoom = await _roomService.JoinRoom(roomId, playerId, playerName);
+
+                if (updatedRoom == null)
+                {
+                    // Race condition - room became full
+                    await Clients.Caller.SendAsync("JoinRoomError", new { error = "Room is full" });
+                    return new { success = false, error = "Room is full" };
+                }
+
+                // Join thành công
+                await _userConnectionService.AddUserConnection(playerId, Context.ConnectionId, updatedRoom.Id);
+                await Groups.AddToGroupAsync(Context.ConnectionId, $"Room_{updatedRoom.Id}");
 
                 _logger.LogInformation("✅ Player {PlayerId} joined Room {RoomId}. Current players: {Count}",
-                    playerId, roomId, updatedRoom?.CurrentPlayers);
-
+                    playerId, roomId, updatedRoom.CurrentPlayers);
+                // Success notifications
                 await Clients.Caller.SendAsync("JoinedRoom", new { room = updatedRoom, success = true });
                 await Clients.GroupExcept($"Room_{roomId}", Context.ConnectionId)
                     .SendAsync("PlayerJoined", new { playerId, playerName, room = updatedRoom });
-
                 await Clients.Group("RoomList").SendAsync("RoomUpdated", updatedRoom);
+
+                return new { room = updatedRoom, success = true };
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "❌ Error in JoinRoom {RoomId} for Player {PlayerId}", roomId, Context.User?.Identity?.Name);
-                await Clients.Caller.SendAsync("Error", $"can't join room: {ex.Message}");
+                _logger.LogError(ex, "❌ Error in JoinRoom {RoomId} for Player {PlayerId}",
+                    roomId, Context.User?.Identity?.Name);
+
+                // CHỈ GỬI 1 LẦN ERROR
+                await Clients.Caller.SendAsync("JoinRoomError", new { error = "Cannot join room" });
+                return new { success = false, error = "Cannot join room" };
             }
         }
 
-        public async Task LeaveRoom()
+
+
+        public async Task<object> LeaveRoom()
         {
             try
             {
@@ -235,16 +271,14 @@ namespace CleanArchitecture.Presentation.Hubs
                 if (playerId == null)
                 {
                     _logger.LogWarning("⚠️ Unauthorized LeaveRoom attempt. ConnectionId: {ConnectionId}", Context.ConnectionId);
-                    await Clients.Caller.SendAsync("Error", "Unauthorized: Invalid token");
-                    return;
+                    throw new HubException("Unauthorized: Invalid token");
                 }
 
                 var userConnection = await _userConnectionService.GetUserByConnection(Context.ConnectionId);
                 if (userConnection == null || string.IsNullOrEmpty(userConnection.RoomId))
                 {
                     _logger.LogWarning("⚠️ Player {PlayerId} not in any room", playerId);
-                    await Clients.Caller.SendAsync("Error", "You are not in any room");
-                    return;
+                    throw new HubException("You are not in any room");
                 }
 
                 var roomId = userConnection.RoomId;
@@ -272,16 +306,18 @@ namespace CleanArchitecture.Presentation.Hubs
                         });
 
                     await Clients.Group("RoomList").SendAsync("RoomUpdated", updatedRoom);
+                    return new { room = updatedRoom, success = true };
                 }
                 else
                 {
                     await Clients.Group("RoomList").SendAsync("RoomRemoved", roomId);
+                    return new { room = roomId, success = true };
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "❌ Error in LeaveRoom for Player {PlayerId}", Context.User?.Identity?.Name);
-                await Clients.Caller.SendAsync("Error", $"can't leave room: {ex.Message}");
+                throw new HubException($"can't leave roo: {ex.Message}");
             }
         }
 

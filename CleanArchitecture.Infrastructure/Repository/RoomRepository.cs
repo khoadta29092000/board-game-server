@@ -2,6 +2,7 @@
 using CleanArchitecture.Domain.Model;
 using CleanArchitecture.Domain.Model.Room;
 using Microsoft.Extensions.Options;
+using MongoDB.Bson;
 using MongoDB.Driver;
 
 namespace CleanArchitecture.Infrastructure.Repository
@@ -50,15 +51,20 @@ namespace CleanArchitecture.Infrastructure.Repository
             }
         }
 
-        public async Task<Room> JoinRoom(string roomId, string playerId, string playerName)
+        public async Task<Room?> JoinRoom(string roomId, string playerId, string playerName)
         {
-            var filter = Builders<Room>.Filter.Eq(r => r.Id, roomId);
+            var currentRoom = await GetRoomById(roomId);
+            if (currentRoom == null || currentRoom.CurrentPlayers >= currentRoom.QuantityPlayer)
+                return null;
 
-            var existingRoom = await GetRoomById(roomId);
-            if (existingRoom?.Players.Any(p => p.PlayerId == playerId) == true)
-            {
-                return existingRoom;
-            }
+            var filter = Builders<Room>.Filter.And(
+                Builders<Room>.Filter.Eq(r => r.Id, roomId),
+                Builders<Room>.Filter.Eq(r => r.Status, RoomStatus.Waiting),
+                Builders<Room>.Filter.Lt(r => r.CurrentPlayers, currentRoom.QuantityPlayer), 
+                Builders<Room>.Filter.Not(
+                    Builders<Room>.Filter.ElemMatch(r => r.Players, p => p.PlayerId == playerId)
+                )
+            );
 
             var update = Builders<Room>.Update.Combine(
                 Builders<Room>.Update.Push(r => r.Players, new RoomPlayer
@@ -70,12 +76,12 @@ namespace CleanArchitecture.Infrastructure.Repository
                 Builders<Room>.Update.Inc(r => r.CurrentPlayers, 1)
             );
 
-            var options = new FindOneAndUpdateOptions<Room>
-            {
-                ReturnDocument = ReturnDocument.After
-            };
+            var updatedRoom = await _roomsCollection.FindOneAndUpdateAsync(
+                filter,
+                update,
+                new FindOneAndUpdateOptions<Room> { ReturnDocument = ReturnDocument.After }
+            );
 
-            var updatedRoom = await _roomsCollection.FindOneAndUpdateAsync(filter, update, options);
             return updatedRoom;
         }
 

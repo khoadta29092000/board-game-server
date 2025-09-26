@@ -55,29 +55,15 @@ namespace CleanArchitecture.Application.Service
             }
         }
 
-        public async Task<Room> JoinRoom(string roomId, string playerId, string playerName)
+        public async Task<Room?> JoinRoom(string roomId, string playerId, string playerName)
         {
             try
             {
-                // Validate room exists and can be joined
                 var room = await _roomRepository.GetRoomById(roomId);
-                if (room == null)
+                if (room == null || room.Status != RoomStatus.Waiting ||
+                    room.CurrentPlayers >= room.QuantityPlayer)
                 {
-                    throw new ArgumentException("Room not found");
-                }
-
-                if (room.Status != RoomStatus.Waiting)
-                {
-                    throw new InvalidOperationException("Room is not available for joining");
-                }
-
-                if (room.CurrentPlayers >= room.QuantityPlayer)
-                {
-                    // Check if player is already in room
-                    if (!room.Players.Any(p => p.PlayerId == playerId))
-                    {
-                        throw new InvalidOperationException("Room is full");
-                    }
+                    return null; 
                 }
 
                 return await _roomRepository.JoinRoom(roomId, playerId, playerName);
@@ -85,7 +71,7 @@ namespace CleanArchitecture.Application.Service
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error joining room {RoomId} for player {PlayerId}", roomId, playerId);
-                throw new Exception($"Failed to join room: {ex.Message}");
+                return null;
             }
         }
 

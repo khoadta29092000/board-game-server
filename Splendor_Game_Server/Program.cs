@@ -8,11 +8,15 @@ using CleanArchitecture.Infrastructure.Repository;
 using CleanArchitecture.Infrastructure.Security;
 using CleanArchitecture.Presentation.Hubs;
 using GraphQL;
+using MessagePack;
+using MessagePack.Resolvers;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
-using System.Text;
 using Newtonsoft.Json.Converters;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -49,7 +53,28 @@ builder.Logging.AddConsole();
 builder.Logging.AddAzureWebAppDiagnostics();
 
 //add signalR real time
-builder.Services.AddSignalR();
+builder.Services.AddSignalR(options =>
+{
+    options.EnableDetailedErrors = true;
+})
+.AddJsonProtocol(options =>
+{
+    options.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+    options.PayloadSerializerOptions.WriteIndented = false;
+    options.PayloadSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+    options.PayloadSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
+    options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+})
+.AddMessagePackProtocol(options =>
+{
+        options.SerializerOptions = MessagePackSerializerOptions.Standard
+            .WithResolver(CompositeResolver.Create(
+                AttributeFormatterResolver.Instance,
+                DynamicEnumAsStringResolver.Instance,
+                StandardResolver.Instance
+            ))
+            .WithSecurity(MessagePackSecurity.UntrustedData);
+});
 
 builder.Services.AddGraphQLServer()
                 .AddQueryType<PlayerQuery>()
@@ -124,7 +149,7 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
     app.UseSwaggerUI(c =>
     {
         c.SwaggerEndpoint("/swagger/v1/swagger.json", "Splendor Game v1");
-        c.RoutePrefix = "swagger"; 
+        c.RoutePrefix = "swagger";
     });
 }
 

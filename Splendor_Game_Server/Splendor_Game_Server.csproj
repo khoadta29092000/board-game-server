@@ -30,6 +30,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.MessagePack" Version="8.0.8" />
 		<PackageReference Include="Microsoft.Extensions.Logging.AzureAppServices" Version="9.0.9" />
 	</ItemGroup>
 

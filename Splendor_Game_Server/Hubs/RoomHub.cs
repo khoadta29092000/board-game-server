@@ -101,8 +101,17 @@ namespace CleanArchitecture.Presentation.Hubs
 
         public async Task JoinRoomListGroup()
         {
-            _logger.LogInformation("➡️ {ConnectionId} joined RoomList group", Context.ConnectionId);
-            await Groups.AddToGroupAsync(Context.ConnectionId, "RoomList");
+            try
+            {
+                _logger.LogInformation("➡️ {ConnectionId} joined RoomList group", Context.ConnectionId);
+                await Groups.AddToGroupAsync(Context.ConnectionId, "RoomList");
+                _logger.LogInformation("✅ {ConnectionId} successfully joined RoomList group", Context.ConnectionId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error joining RoomList group for {ConnectionId}", Context.ConnectionId);
+                throw; // Re-throw để client nhận được lỗi
+            }
         }
 
         public async Task LeaveRoomListGroup()

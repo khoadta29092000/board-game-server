@@ -8,7 +8,7 @@
 
         public string PlayersCollectionName { get; set; } = null!;
         public string VerificationCodesCollectionName { get; set; } = null!;
-
+        public string GameStatesCollectionName { get; set; } = null!;
         public string RoomsCollectionName { get; set; } = null!;
     }
 }

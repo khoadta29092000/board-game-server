@@ -23,5 +23,9 @@ namespace CleanArchitecture.Domain.Model.Room
         [Key("isOwner")]
         [JsonPropertyName("isOwner")]
         public bool IsOwner { get; set; }
+        [BsonElement("isReady")]
+        [Key("isReady")]
+        [JsonPropertyName("isReady")]
+        public bool isReady { get; set; }
     }
 }

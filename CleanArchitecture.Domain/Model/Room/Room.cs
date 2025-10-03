@@ -33,7 +33,7 @@ namespace CleanArchitecture.Domain.Model.Room
 
         [BsonElement("currentPlayers")]
         [Key("currentPlayers")]
-        [JsonPropertyName("CurrentPlayers")]
+        [JsonPropertyName("currentPlayers")]
         public int CurrentPlayers { get; set; }
 
         [BsonElement("players")]

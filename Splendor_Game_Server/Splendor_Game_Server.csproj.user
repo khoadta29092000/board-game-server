@@ -3,7 +3,7 @@
   <PropertyGroup>
     <Controller_SelectedScaffolderID>ApiControllerEmptyScaffolder</Controller_SelectedScaffolderID>
     <Controller_SelectedScaffolderCategoryPath>root/Common/Api</Controller_SelectedScaffolderCategoryPath>
-    <NameOfLastUsedPublishProfile>C:\Users\khoa\Desktop\workspace\vip-pro-code\chat-app\Splendor_Game_Server\Properties\PublishProfiles\SplendorGameServer20250924045201 - Zip Deploy.pubxml</NameOfLastUsedPublishProfile>
+    <NameOfLastUsedPublishProfile>C:\Users\khoa\Desktop\workspace\vip-pro-code\board game\board-game-server\.github\workflows\main_splendorgameserver20250924045201.yml</NameOfLastUsedPublishProfile>
     <ActiveDebugProfile>Splendor_Game_Server</ActiveDebugProfile>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">

@@ -1,17 +1,14 @@
-﻿using CleanArchitecture.Domain.Model.Splendor.Components;
+﻿using CleanArchitecture.Application.IRepository;
+using CleanArchitecture.Domain.Model.Splendor.Components;
 using CleanArchitecture.Domain.Model.Splendor.Entity;
 using CleanArchitecture.Domain.Model.Splendor.System;
 using StackExchange.Redis;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+
 using System.Text.Json;
-using System.Threading.Tasks;
 
 namespace CleanArchitecture.Infrastructure.Redis
 {
-    public class GameRedisMapper
+    public class GameRedisMapper : IRedisMapper
     {
         private readonly IDatabase _redis;
         private readonly JsonSerializerOptions _jsonOptions;
@@ -175,7 +172,7 @@ namespace CleanArchitecture.Infrastructure.Redis
                 currentPlayer = currentPlayerComp?.PlayerId,
                 currentPlayerIndex = turnComp.CurrentPlayerIndex,
                 phase = turnComp.Phase.ToString(),
-                turnNumber = turnComp.CurrentPlayerIndex + 1, // Simplified
+                turnNumber = turnComp.TurnNumber, // Simplified
                 isLastRound = turnComp.IsLastRound,
                 lastActionTime = turnComp.LastActionTime
             };

@@ -25,6 +25,7 @@ namespace CleanArchitecture.Domain.Model.Splendor.System
         {
             var playerCount = context.GameSession.PlayerEntityIds.Count;
             turnComponent.CurrentPlayerIndex = (turnComponent.CurrentPlayerIndex + 1) % playerCount;
+            turnComponent.TurnNumber += 1;
             turnComponent.Phase = TurnPhase.WaitingForAction;
             turnComponent.LastActionTime = DateTime.UtcNow;
         }

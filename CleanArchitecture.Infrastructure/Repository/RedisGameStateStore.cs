@@ -1,9 +1,10 @@
 ﻿using CleanArchitecture.Application.IRepository;
+using CleanArchitecture.Domain.DTO.Splendor;
 using CleanArchitecture.Domain.Model.Splendor.System;
 using StackExchange.Redis;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using RedisDatabase = StackExchange.Redis.IDatabase;
-using CleanArchitecture.Domain.DTO.Splendor;
 
 namespace CleanArchitecture.Infrastructure.Repository
 {
@@ -15,7 +16,10 @@ namespace CleanArchitecture.Infrastructure.Repository
         private static readonly JsonSerializerOptions _jsonOptions = new()
         {
             WriteIndented = false,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            IncludeFields = true,
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+            Converters = { new JsonStringEnumConverter() }
         };
 
         public RedisGameStateStore(IConnectionMultiplexer redis)
@@ -33,14 +37,23 @@ namespace CleanArchitecture.Infrastructure.Repository
 
         public async Task<GameContext?> LoadGameContext(string roomCode)
         {
-            var value = await _db.StringGetAsync($"splendor:game:{roomCode}");
-            if (value.IsNullOrEmpty) return null;
-            return JsonSerializer.Deserialize<GameContext>(value!, _jsonOptions);
+          
+                var value = await _db.StringGetAsync($"splendor:game:{roomCode}");
+                if (value.IsNullOrEmpty)
+                    return null;
+
+                return JsonSerializer.Deserialize<GameContext>(value!, _jsonOptions);
+          
         }
 
         public async Task DeleteGameContext(string roomCode)
         {
             await _db.KeyDeleteAsync($"splendor:game:{roomCode}");
+
+            await _db.KeyDeleteAsync($"game:{roomCode}:players");
+            await _db.KeyDeleteAsync($"game:{roomCode}:turn");
+            await _db.KeyDeleteAsync($"game:{roomCode}:board");
+            await _db.KeyDeleteAsync($"game:{roomCode}:info");
         }
         #endregion
 

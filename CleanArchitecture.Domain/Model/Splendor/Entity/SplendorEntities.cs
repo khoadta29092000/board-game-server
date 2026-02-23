@@ -1,11 +1,21 @@
 ﻿using CleanArchitecture.Domain.Model.Splendor.Components;
+using System.Text.Json.Serialization;
 
 namespace CleanArchitecture.Domain.Model.Splendor.Entity
 {
+    [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
+    [JsonDerivedType(typeof(GameSession), "gameSession")]
+    [JsonDerivedType(typeof(PlayerEntity), "playerEntity")]
+    [JsonDerivedType(typeof(CardEntity), "cardEntity")]
+    [JsonDerivedType(typeof(NobleEntity), "nobleEntity")]
+    [JsonDerivedType(typeof(BoardEntity), "boardEntity")]
+
     public abstract class SplendorEntities
     {
         public Guid Id { get; protected set; }
-        private List<IComponent> _components = new();
+
+        [JsonInclude]
+        public List<IComponent> Components { get; private set; } = new();
 
         protected SplendorEntities()
         {
@@ -14,26 +24,26 @@ namespace CleanArchitecture.Domain.Model.Splendor.Entity
 
         public void AddComponent(IComponent component)
         {
-            _components.Add(component);
+            Components.Add(component);
         }
 
         public T? GetComponent<T>() where T : class, IComponent
         {
-            return _components.OfType<T>().FirstOrDefault();
+            return Components.OfType<T>().FirstOrDefault();
         }
 
-        public IEnumerable<IComponent> GetComponents() => _components;
+        public IEnumerable<IComponent> GetComponents() => Components;
 
         public bool HasComponent<T>() where T : IComponent
         {
-            return _components.OfType<T>().Any();
+            return Components.OfType<T>().Any();
         }
 
         public void RemoveComponent<T>() where T : IComponent
         {
-            var component = _components.OfType<T>().FirstOrDefault();
+            var component = Components.OfType<T>().FirstOrDefault();
             if (component != null)
-                _components.Remove(component);
+                Components.Remove(component);
         }
     }
 }

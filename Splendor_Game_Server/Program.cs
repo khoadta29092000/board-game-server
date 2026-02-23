@@ -13,6 +13,7 @@ using GraphQL;
 using MessagePack;
 using MessagePack.Resolvers;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Newtonsoft.Json.Converters;
@@ -21,6 +22,8 @@ using StackExchange.Redis;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -49,6 +52,105 @@ builder.Services.AddControllers()
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddAWSLambdaHosting(LambdaEventSource.HttpApi);
 
+// ============== RATE LIMITING ==============
+builder.Services.AddRateLimiter(options =>
+{
+    // 1. Fixed Window: Giới hạn theo khung thời gian cố định
+    options.AddFixedWindowLimiter("fixed", opt =>
+    {
+        opt.PermitLimit = 100; // 100 requests
+        opt.Window = TimeSpan.FromMinutes(1); // trong 1 phút
+        opt.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+        opt.QueueLimit = 10; // Queue tối đa 10 requests
+    });
+
+    // 2. Sliding Window: Giới hạn linh hoạt hơn
+    options.AddSlidingWindowLimiter("sliding", opt =>
+    {
+        opt.PermitLimit = 50;
+        opt.Window = TimeSpan.FromMinutes(1);
+        opt.SegmentsPerWindow = 4; // Chia thành 4 đoạn 15s
+        opt.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+        opt.QueueLimit = 5;
+    });
+
+    // 3. Token Bucket: Cho phép burst traffic
+    options.AddTokenBucketLimiter("token", opt =>
+    {
+        opt.TokenLimit = 100; // Tối đa 100 tokens
+        opt.ReplenishmentPeriod = TimeSpan.FromMinutes(1); // Refill mỗi phút
+        opt.TokensPerPeriod = 50; // Thêm 50 tokens mỗi lần refill
+        opt.AutoReplenishment = true;
+        opt.QueueLimit = 10;
+    });
+
+    // 4. Concurrency: Giới hạn số requests đồng thời
+    options.AddConcurrencyLimiter("concurrent", opt =>
+    {
+        opt.PermitLimit = 20; // Tối đa 20 requests cùng lúc
+        opt.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+        opt.QueueLimit = 30;
+    });
+
+    // 5. Rate limit riêng cho từng user (dựa trên IP hoặc UserId)
+    options.AddPolicy("perUser", context =>
+    {
+        // Lấy UserId từ JWT token
+        var userId = context.User?.FindFirst("UserId")?.Value;
+
+        // Fallback sang IP nếu không có UserId
+        var key = userId ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
+
+        return RateLimitPartition.GetSlidingWindowLimiter(key, _ =>
+            new SlidingWindowRateLimiterOptions
+            {
+                PermitLimit = 30, // 30 requests
+                Window = TimeSpan.FromMinutes(1), // mỗi phút
+                SegmentsPerWindow = 3,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = 5
+            });
+    });
+
+    // 6. Rate limit cho Admin (ít hạn chế hơn)
+    options.AddPolicy("admin", context =>
+    {
+        var isAdmin = context.User?.IsInRole("Admin") ?? false;
+
+        if (isAdmin)
+        {
+            return RateLimitPartition.GetNoLimiter("admin");
+        }
+
+        return RateLimitPartition.GetFixedWindowLimiter("user", _ =>
+            new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 100,
+                Window = TimeSpan.FromMinutes(1)
+            });
+    });
+
+    // Global settings
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    options.OnRejected = async (context, token) =>
+    {
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+
+        if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+        {
+            context.HttpContext.Response.Headers.RetryAfter = retryAfter.TotalSeconds.ToString();
+        }
+
+        await context.HttpContext.Response.WriteAsJsonAsync(new
+        {
+            error = "Too many requests",
+            message = "Please try again later",
+            retryAfter = retryAfter.TotalSeconds
+        }, cancellationToken: token);
+    };
+});
+
 // ============== REDIS ==============
 builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
 {
@@ -74,7 +176,7 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
 });
 
 builder.Services.AddSingleton<IGameStateStore, RedisGameStateStore>();
-builder.Services.AddSingleton<GameRedisMapper>();
+builder.Services.AddSingleton<IRedisMapper , GameRedisMapper>();
 
 // ============== SPLENDOR SYSTEMS ==============
 builder.Services.AddSingleton<NobleVisitSystem>();
@@ -204,6 +306,12 @@ builder.Services.AddControllers()
     {
         options.JsonSerializerOptions.WriteIndented = true;
         options.JsonSerializerOptions.Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping;
+
+        // ✅ Cho phép đọc metadata $type từ [JsonPolymorphic]/[JsonDerivedType]
+        options.JsonSerializerOptions.TypeInfoResolver = new DefaultJsonTypeInfoResolver();
+
+        // ✅ Không phân biệt hoa thường khi deserialize property name
+        options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
     });
 
 // Swagger

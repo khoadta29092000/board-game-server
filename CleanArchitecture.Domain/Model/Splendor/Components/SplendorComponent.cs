@@ -1,7 +1,14 @@
 ﻿using CleanArchitecture.Domain.Model.Splendor.Enum;
+using System.Text.Json.Serialization;
 
 namespace CleanArchitecture.Domain.Model.Splendor.Components
 {
+    [JsonPolymorphic(TypeDiscriminatorPropertyName = "$componentType")]
+    [JsonDerivedType(typeof(PlayerComponent), "player")]
+    [JsonDerivedType(typeof(CardComponent), "card")]
+    [JsonDerivedType(typeof(NobleComponent), "noble")]
+    [JsonDerivedType(typeof(BoardComponent), "board")]
+    [JsonDerivedType(typeof(TurnComponent), "turn")]
     public interface IComponent { }
 
     // Component cho Player
@@ -13,6 +20,18 @@ namespace CleanArchitecture.Domain.Model.Splendor.Components
         public Dictionary<GemColor, int> Gems { get; set; }
         public Dictionary<GemColor, int> Bonuses { get; set; }
         public List<Guid> ReservedCards { get; set; }
+
+        // ⬇️ THÊM constructor rỗng
+        [JsonConstructor]
+        public PlayerComponent()
+        {
+            PlayerId = string.Empty;
+            Name = string.Empty;
+            PrestigePoints = 0;
+            Gems = new Dictionary<GemColor, int>();
+            Bonuses = new Dictionary<GemColor, int>();
+            ReservedCards = new List<Guid>();
+        }
 
         public PlayerComponent(string playerId, string name)
         {
@@ -48,6 +67,16 @@ namespace CleanArchitecture.Domain.Model.Splendor.Components
         public GemColor BonusColor { get; set; }
         public Dictionary<GemColor, int> Cost { get; set; }
 
+        // ⬇️ THÊM constructor rỗng
+        [JsonConstructor]
+        public CardComponent()
+        {
+            Level = 0;
+            PrestigePoints = 0;
+            BonusColor = GemColor.White;
+            Cost = new Dictionary<GemColor, int>();
+        }
+
         public CardComponent(int level, int prestigePoints, GemColor bonusColor, Dictionary<GemColor, int> cost)
         {
             Level = level;
@@ -63,6 +92,14 @@ namespace CleanArchitecture.Domain.Model.Splendor.Components
         public int PrestigePoints { get; set; }
         public Dictionary<GemColor, int> Requirements { get; set; }
 
+        // ⬇️ THÊM constructor rỗng
+        [JsonConstructor]
+        public NobleComponent()
+        {
+            PrestigePoints = 3;
+            Requirements = new Dictionary<GemColor, int>();
+        }
+
         public NobleComponent(Dictionary<GemColor, int> requirements)
         {
             PrestigePoints = 3;
@@ -75,10 +112,18 @@ namespace CleanArchitecture.Domain.Model.Splendor.Components
     {
         public Dictionary<GemColor, int> AvailableGems { get; set; }
         public Dictionary<int, Queue<Guid>> CardDecks { get; set; }
-
         public Dictionary<int, List<Guid>> VisibleCards { get; set; }
-
         public List<Guid> VisibleNobles { get; set; }
+
+        // ⬇️ THÊM constructor rỗng
+        [JsonConstructor]
+        public BoardComponent()
+        {
+            AvailableGems = new Dictionary<GemColor, int>();
+            CardDecks = new Dictionary<int, Queue<Guid>>();
+            VisibleCards = new Dictionary<int, List<Guid>>();
+            VisibleNobles = new List<Guid>();
+        }
 
         public BoardComponent(int playerCount)
         {
@@ -119,7 +164,7 @@ namespace CleanArchitecture.Domain.Model.Splendor.Components
             };
         }
 
-        // helper: refill visible up to 4 per level using deck
+        // ... rest of methods giữ nguyên
         public void RefillVisible(int level, int maxVisible = 4)
         {
             if (!CardDecks.ContainsKey(level) || !VisibleCards.ContainsKey(level)) return;
@@ -133,7 +178,6 @@ namespace CleanArchitecture.Domain.Model.Splendor.Components
             }
         }
 
-        // draw one from deck level (returns Guid.Empty if none)
         public Guid DrawFromDeck(int level)
         {
             if (!CardDecks.ContainsKey(level)) return Guid.Empty;
@@ -142,7 +186,6 @@ namespace CleanArchitecture.Domain.Model.Splendor.Components
             return deck.Dequeue();
         }
 
-        // shuffle utils (fill CardDecks from list per level)
         public void SeedDecks(Dictionary<int, List<Guid>> levelToCards, Random rng = null)
         {
             rng ??= new Random();
@@ -161,8 +204,11 @@ namespace CleanArchitecture.Domain.Model.Splendor.Components
         public int CurrentPlayerIndex { get; set; }
         public TurnPhase Phase { get; set; }
         public DateTime LastActionTime { get; set; }
-        public bool IsLastRound { get; set; } 
+        public bool IsLastRound { get; set; }
         public int LastRoundStartPlayerIndex { get; set; }
+        
+        public int TurnNumber { get; set; }
+
         public TurnComponent()
         {
             CurrentPlayerIndex = 0;
@@ -170,6 +216,7 @@ namespace CleanArchitecture.Domain.Model.Splendor.Components
             LastActionTime = DateTime.UtcNow;
             IsLastRound = false;
             LastRoundStartPlayerIndex = -1;
+            TurnNumber = 1;
         }
     }
 }

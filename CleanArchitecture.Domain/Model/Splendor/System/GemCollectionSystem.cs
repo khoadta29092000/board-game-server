@@ -36,7 +36,8 @@ namespace CleanArchitecture.Domain.Model.Splendor.System
             if (total == 3)
             {
                 // 3 màu khác nhau
-                if (!(gemsToCollect.Values.All(v => v == 1) && distinct == 3)) return false;
+                if (distinct != 3 || !gemsToCollect.All(kv => kv.Value == 0 || kv.Value == 1))
+                    return false;
             }
             else if (total == 2)
             {

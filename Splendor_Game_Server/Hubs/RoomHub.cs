@@ -1,4 +1,5 @@
-﻿using CleanArchitecture.Application.IService;
+﻿using CleanArchitecture.Application.IRepository;
+using CleanArchitecture.Application.IService;
 using CleanArchitecture.Domain.Exceptions;
 using CleanArchitecture.Domain.Model.Player;
 using CleanArchitecture.Domain.Model.Room;
@@ -17,9 +18,9 @@ namespace CleanArchitecture.Presentation.Hubs
         private readonly IUserConnectionService _userConnectionService;
         private readonly ILogger<RoomHub> _logger;
         private readonly ISplendorService _gameService;
-        private readonly GameRedisMapper _redisMapper;
+        private readonly IRedisMapper _redisMapper;
 
-        public RoomHub(IRoomService roomService, IUserConnectionService userConnectionService, ILogger<RoomHub> logger, ISplendorService gameService, GameRedisMapper redisMapper)
+        public RoomHub(IRoomService roomService, IUserConnectionService userConnectionService, ILogger<RoomHub> logger, ISplendorService gameService, IRedisMapper redisMapper)
         {
             _roomService = roomService;
             _userConnectionService = userConnectionService;
@@ -391,6 +392,7 @@ namespace CleanArchitecture.Presentation.Hubs
             }
         }
 
+
         private async Task<object> HandleHubError(Exception ex, string defaultMessage)
         {
             var errorMessage = ex switch
@@ -411,5 +413,6 @@ namespace CleanArchitecture.Presentation.Hubs
             //await Clients.Caller.SendAsync("Error", errorMessage);
             return new { success = false, error = errorMessage };
         }
+
     }
 }

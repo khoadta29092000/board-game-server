@@ -1,21 +1,32 @@
 ﻿using CleanArchitecture.Domain.Model.Splendor.Components;
 using CleanArchitecture.Domain.Model.Splendor.Enum;
-using static GraphQL.Validation.BasicVisitor;
+using System.Text.Json.Serialization;
 
 namespace CleanArchitecture.Domain.Model.Splendor.Entity
 {
     public class GameSession : SplendorEntities
     {
+        [JsonInclude]
         public GameStatus Status { get; private set; }
+        [JsonInclude]
         public string? WinnerId { get; private set; }
+        [JsonInclude]
         public DateTime? CompletedAt { get; private set; }
+        [JsonInclude]
         public int? FirstPlayerToReach15Index { get; private set; }
+        [JsonInclude]
         public string RoomCode { get; private set; }
+        [JsonInclude]
         public DateTime CreatedAt { get; private set; }
+        [JsonInclude]
         public DateTime? StartedAt { get; private set; }
+        [JsonInclude]
         public List<Guid> PlayerEntityIds { get; private set; }
+        [JsonInclude]
         public List<Guid> CardDeckIds { get; private set; }
+        [JsonInclude]
         public List<Guid> NobleIds { get; private set; }   // ⬅ private set
+        [JsonInclude]
         public Guid BoardEntityId { get; private set; }
 
         public GameSession(string roomCode)
@@ -47,6 +58,7 @@ namespace CleanArchitecture.Domain.Model.Splendor.Entity
 
     public class PlayerEntity : SplendorEntities
     {
+        public PlayerEntity() { }
         public PlayerEntity(string playerId, string name)
         {
             AddComponent(new PlayerComponent(playerId, name));
@@ -55,6 +67,7 @@ namespace CleanArchitecture.Domain.Model.Splendor.Entity
 
     public class CardEntity : SplendorEntities
     {
+        public CardEntity() { }
         public CardEntity(int level, int prestigePoints, GemColor bonusColor, Dictionary<GemColor, int> cost)
         {
             AddComponent(new CardComponent(level, prestigePoints, bonusColor, cost));
@@ -63,6 +76,7 @@ namespace CleanArchitecture.Domain.Model.Splendor.Entity
 
     public class NobleEntity : SplendorEntities
     {
+        public NobleEntity() { }
         public NobleEntity(Dictionary<GemColor, int> requirements)
         {
             AddComponent(new NobleComponent(requirements));
@@ -71,6 +85,7 @@ namespace CleanArchitecture.Domain.Model.Splendor.Entity
 
     public class BoardEntity : SplendorEntities
     {
+        public BoardEntity() { }
         public BoardEntity(int playerCount)
         {
             AddComponent(new BoardComponent(playerCount));

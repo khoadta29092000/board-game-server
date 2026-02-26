@@ -236,6 +236,46 @@ namespace CleanArchitecture.Infrastructure.Redis
             return await _redis.StringGetAsync($"game:{gameId}:board");
         }
 
+        public async Task<string?> GetCardDecks(string gameId)
+        {
+            var boardJson = await GetBoard(gameId);
+
+            if (string.IsNullOrEmpty(boardJson))
+                return null;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(boardJson);
+
+                var root = doc.RootElement;
+
+                var visibleCards = root.GetProperty("visibleCards");
+
+                int level1Visible = visibleCards.GetProperty("level1").GetArrayLength();
+                int level2Visible = visibleCards.GetProperty("level2").GetArrayLength();
+                int level3Visible = visibleCards.GetProperty("level3").GetArrayLength();
+
+                // Tổng số lá chuẩn Splendor
+                const int TOTAL_LEVEL1 = 40;
+                const int TOTAL_LEVEL2 = 30;
+                const int TOTAL_LEVEL3 = 20;
+
+                var result = new
+                {
+                    level1 = TOTAL_LEVEL1 - level1Visible,
+                    level2 = TOTAL_LEVEL2 - level2Visible,
+                    level3 = TOTAL_LEVEL3 - level3Visible
+                };
+
+                return JsonSerializer.Serialize(result);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ GetCardDecks error: {ex.Message}");
+                return null;
+            }
+        }
+
         public async Task<string?> GetTurn(string gameId)
         {
             return await _redis.StringGetAsync($"game:{gameId}:turn");

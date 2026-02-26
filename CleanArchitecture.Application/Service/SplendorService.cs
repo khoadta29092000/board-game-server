@@ -109,15 +109,15 @@ namespace CleanArchitecture.Application.Service
             await _stateStore.SaveGameContext(roomCode, context);
             return true;
         }
-        public async Task<object> CollectGemsAsync(string roomCode, string playerId, Dictionary<GemColor, int> gems)
+        public async Task<object> CollectGemsAsync(string gameId, string playerId, Dictionary<GemColor, int> gems)
         {
-            var context = await _stateStore.LoadGameContext(roomCode);
+            var context = await _stateStore.LoadGameContext(gameId);
 
             if (context == null)
-                throw new GameNotFoundException(roomCode);
+                throw new GameNotFoundException(gameId);
 
             if (context.GameSession.Status != GameStatus.InProgress)
-                throw new GameNotInProgressException(roomCode);
+                throw new GameNotInProgressException(gameId);
 
             var currentPlayer = _turnSystem.GetCurrentPlayerId(context);
             if (currentPlayer != playerId)
@@ -140,8 +140,8 @@ namespace CleanArchitecture.Application.Service
                 _winSystem.Execute(context);
             }
 
-            await _stateStore.SaveGameContext(roomCode, context);
-            await _redisMapper.SyncGameStateToRedis(context, roomCode);
+            await _stateStore.SaveGameContext(gameId, context);
+            await _redisMapper.SyncGameStateToRedis(context, gameId);
             return new
             {
                 success = true,

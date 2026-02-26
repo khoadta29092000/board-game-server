@@ -152,26 +152,71 @@ builder.Services.AddRateLimiter(options =>
 });
 
 // ============== REDIS ==============
+//builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
+//{
+//    var redisConnection = builder.Configuration.GetConnectionString("Redis");
+//    var config = ConfigurationOptions.Parse(redisConnection);
+//    config.AbortOnConnectFail = false;
+//    config.ConnectTimeout = 30000;
+//    config.SyncTimeout = 60000;
+//    config.ConnectRetry = 5;
+//    config.AllowAdmin = true; // Đổi thành false
+//    
+//    config.SslProtocols = System.Security.Authentication.SslProtocols.Tls12;
+//   
+//    var multiplexer = ConnectionMultiplexer.Connect(config);
+//    multiplexer.ConnectionFailed += (sender, args) =>
+//    {
+//        Console.WriteLine($"Connection failed: {args.Exception.Message}");
+//    };
+//    multiplexer.ConnectionRestored += (sender, args) =>
+//    {
+//        Console.WriteLine("Connection restored");
+//    };
+//    return multiplexer;
+//});
+
 builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
 {
-    var redisConnection = builder.Configuration.GetConnectionString("Redis");
-    var config = ConfigurationOptions.Parse(redisConnection);
-    config.AbortOnConnectFail = false;
-    config.ConnectTimeout = 15000;
-    config.SyncTimeout = 15000;
-    config.ConnectRetry = 5;
-    config.AllowAdmin = true;
-    config.SslProtocols = System.Security.Authentication.SslProtocols.Tls12;
+    var configuration = sp.GetRequiredService<IConfiguration>();
+    var host = configuration.GetConnectionString("Redis");
+    var user = configuration["RedisSettings:User"];
+    var password = configuration["RedisSettings:Password"];
+
+    var config = new ConfigurationOptions
+    {
+        EndPoints = { host },
+        User = user,
+        Password = password,
+        Ssl = false, 
+        SslProtocols = System.Security.Authentication.SslProtocols.Tls13,
+        AbortOnConnectFail = true, 
+        ConnectTimeout = 30000,
+        SyncTimeout = 30000,
+        AsyncTimeout = 30000,
+        ConnectRetry = 5,
+        Protocol = RedisProtocol.Resp3, 
+        AllowAdmin = false
+    };
+
+    config.CertificateValidation += (sender, cert, chain, errors) => true;
 
     var multiplexer = ConnectionMultiplexer.Connect(config);
+
     multiplexer.ConnectionFailed += (sender, args) =>
     {
-        Console.WriteLine($"Connection failed: {args.Exception.Message}");
+        Console.WriteLine($"❌ Redis Connection failed: {args.Exception?.Message}");
+        Console.WriteLine($"   Endpoint: {args.EndPoint}");
+        Console.WriteLine($"   Type: {args.FailureType}");
     };
+
     multiplexer.ConnectionRestored += (sender, args) =>
     {
-        Console.WriteLine("Connection restored");
+        Console.WriteLine($"✅ Redis Connection restored: {args.EndPoint}");
     };
+
+    Console.WriteLine($"🔌 Redis IsConnected: {multiplexer.IsConnected}");
+
     return multiplexer;
 });
 
@@ -372,7 +417,7 @@ app.UseCors(policy => policy
     .SetIsOriginAllowed(_ => true)
 );
 
-app.UseHttpsRedirection();
+//app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 

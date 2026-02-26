@@ -11,9 +11,11 @@ namespace CleanArchitecture.Application.IRepository
     {
         Task SyncGameStateToRedis(GameContext context, string gameId);
         Task<string?> GetGameInfo(string gameId);
+        
         Task<Dictionary<string, string>> GetPlayers(string gameId);
         Task<string?> GetBoard(string gameId);
         Task<string?> GetTurn(string gameId);
+        Task<string?> GetCardDecks(string gameId);
         Task DeleteGame(string gameId);
     }
 }

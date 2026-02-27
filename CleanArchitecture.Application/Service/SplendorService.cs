@@ -1,12 +1,12 @@
 ﻿using CleanArchitecture.Application.IRepository;
 using CleanArchitecture.Application.IService;
+using CleanArchitecture.Domain.DTO.Splendor;
 using CleanArchitecture.Domain.Exceptions;
 using CleanArchitecture.Domain.Model.Room;
 using CleanArchitecture.Domain.Model.Splendor.Components;
 using CleanArchitecture.Domain.Model.Splendor.Entity;
 using CleanArchitecture.Domain.Model.Splendor.Enum;
 using CleanArchitecture.Domain.Model.Splendor.System;
-
 
 namespace CleanArchitecture.Application.Service
 {
@@ -15,8 +15,6 @@ namespace CleanArchitecture.Application.Service
         private readonly ISplendorRepository _configRepo;
         private readonly IGameStateStore _stateStore;
         private readonly IRedisMapper _redisMapper;
-
-        // inject các System
         private readonly GameInitializationSystem _initSystem;
         private readonly GemCollectionSystem _gemSystem;
         private readonly CardPurchaseSystem _purchaseSystem;
@@ -24,7 +22,7 @@ namespace CleanArchitecture.Application.Service
         private readonly DiscardGemSystem _discardSystem;
         private readonly NobleVisitSystem _nobleSystem;
         private readonly TurnSystem _turnSystem;
-        private readonly EndGameSystem _winSystem;
+        private readonly EndGameSystem _endGameSystem;
 
         public SplendorService(
             ISplendorRepository configRepo,
@@ -37,7 +35,7 @@ namespace CleanArchitecture.Application.Service
             DiscardGemSystem discardSystem,
             NobleVisitSystem nobleSystem,
             TurnSystem turnSystem,
-            EndGameSystem winSystem)
+            EndGameSystem endGameSystem)
         {
             _configRepo = configRepo;
             _stateStore = stateStore;
@@ -49,16 +47,18 @@ namespace CleanArchitecture.Application.Service
             _discardSystem = discardSystem;
             _nobleSystem = nobleSystem;
             _turnSystem = turnSystem;
-            _winSystem = winSystem;
+            _endGameSystem = endGameSystem;
         }
 
+        // =====================================================================
+        // START GAME
+        // =====================================================================
         public async Task<GameContext> StartGameAsync(string roomCode, List<RoomPlayer> playerIds)
         {
             var context = new GameContext();
             var session = new GameSession(roomCode);
             context.GameSession = session;
 
-            // Add players
             foreach (var pid in playerIds)
             {
                 var playerEntity = new PlayerEntity(pid.PlayerId, pid.Name);
@@ -66,12 +66,10 @@ namespace CleanArchitecture.Application.Service
                 session.PlayerEntityIds.Add(playerEntity.Id);
             }
 
-            // Create board
             var boardEntity = new BoardEntity(playerIds.Count);
             context.Entities[boardEntity.Id] = boardEntity;
             session.SetBoardEntityId(boardEntity.Id);
 
-            // Load cards & nobles from Mongo
             var cards = await _configRepo.LoadCardsAsync();
             var nobles = await _configRepo.LoadNoblesAsync();
 
@@ -94,30 +92,44 @@ namespace CleanArchitecture.Application.Service
 
             return context;
         }
+
+        // =====================================================================
+        // GET GAME
+        // =====================================================================
         public async Task<GameContext?> GetGameAsync(string roomCode)
         {
             return await _stateStore.LoadGameContext(roomCode);
         }
+
+        // =====================================================================
+        // FORCE START
+        // =====================================================================
         public async Task<bool> ForceStartGameAsync(string roomCode)
         {
             var context = await _stateStore.LoadGameContext(roomCode);
             if (context == null) return false;
 
-            // Force update status
             context.GameSession.StartGame();
 
             await _stateStore.SaveGameContext(roomCode, context);
             return true;
         }
-        public async Task<object> CollectGemsAsync(string gameId, string playerId, Dictionary<GemColor, int> gems)
+
+        // =====================================================================
+        // COLLECT GEMS
+        // - Validate turn, phase, gem selection
+        // - Nếu tổng gems > 10 sau khi nhận → cần discard, giữ phase SelectingGems
+        // - Nếu ok → chuyển turn
+        // =====================================================================
+        public async Task<CollectGemResult> CollectGemsAsync(string roomCode, string playerId, Dictionary<GemColor, int> gems)
         {
-            var context = await _stateStore.LoadGameContext(gameId);
+            var context = await _stateStore.LoadGameContext(roomCode);
 
             if (context == null)
-                throw new GameNotFoundException(gameId);
+                throw new GameNotFoundException(roomCode);
 
             if (context.GameSession.Status != GameStatus.InProgress)
-                throw new GameNotInProgressException(gameId);
+                throw new GameNotInProgressException(roomCode);
 
             var currentPlayer = _turnSystem.GetCurrentPlayerId(context);
             if (currentPlayer != playerId)
@@ -125,6 +137,7 @@ namespace CleanArchitecture.Application.Service
 
             var boardEntity = context.GetEntity<BoardEntity>(context.GameSession.BoardEntityId);
             var turnComp = boardEntity?.GetComponent<TurnComponent>();
+
             if (turnComp?.Phase != TurnPhase.WaitingForAction)
                 throw new InvalidTurnPhaseException(turnComp?.Phase ?? TurnPhase.WaitingForAction, TurnPhase.WaitingForAction);
 
@@ -133,137 +146,38 @@ namespace CleanArchitecture.Application.Service
 
             _gemSystem.CollectGems(context, playerId, gems);
 
-            if (turnComp != null && turnComp.Phase != TurnPhase.SelectingGems)
+            var player = context.GameSession.PlayerEntityIds
+                .Select(id => context.GetEntity<PlayerEntity>(id))
+                .FirstOrDefault(p => p?.GetComponent<PlayerComponent>()?.PlayerId == playerId)
+                ?.GetComponent<PlayerComponent>();
+
+            int totalGems = player?.Gems.Values.Sum() ?? 0;
+            bool needsDiscard = totalGems > 10;
+
+            if (!needsDiscard && turnComp != null)
             {
                 turnComp.Phase = TurnPhase.Completed;
                 _turnSystem.Execute(context);
-                _winSystem.Execute(context);
             }
 
-            await _stateStore.SaveGameContext(gameId, context);
-            await _redisMapper.SyncGameStateToRedis(context, gameId);
-            return new
+            await _stateStore.SaveGameContext(roomCode, context);
+            await _redisMapper.SyncGameStateToRedis(context, roomCode);
+
+            return new CollectGemResult
             {
-                success = true,
-                needsDiscard = turnComp?.Phase == TurnPhase.SelectingGems,
-                currentGems = context.GameSession.PlayerEntityIds
-                                     .Select(id => context.GetEntity<PlayerEntity>(id))
-                                     .FirstOrDefault(p => p?.GetComponent<PlayerComponent>()?.PlayerId == playerId)
-                                     ?.GetComponent<PlayerComponent>()?.Gems.Values.Sum()
+                Success = true,
+                NeedsDiscard = needsDiscard,
+                TotalGems = totalGems,
+                CurrentGems = player?.Gems ?? new Dictionary<GemColor, int>()
             };
         }
 
-        public async Task<bool> PurchaseCardAsync(string roomCode, string playerId, Guid cardId)
-        {
-            var context = await _stateStore.LoadGameContext(roomCode);
-            if (context == null) return false;
-
-            if (!_purchaseSystem.CanPurchaseCard(context, playerId, cardId))
-                return false;
-
-            _purchaseSystem.PurchaseCard(context, playerId, cardId);
-
-            var boardEntity = context.GetEntity<BoardEntity>(context.GameSession.BoardEntityId);
-            var turnComp = boardEntity?.GetComponent<TurnComponent>();
-
-            var eligibleNobles = _nobleSystem.GetEligibleNobles(context, playerId);
-
-            if (eligibleNobles.Count == 1)
-            {
-                // Chỉ 1 noble → tự động assign và chuyển turn
-                _nobleSystem.AssignNoble(context, playerId, eligibleNobles[0]);
-
-                if (turnComp != null)
-                {
-                    turnComp.Phase = TurnPhase.Completed;
-                    _turnSystem.Execute(context); // ← Chuyển turn
-                }
-            }
-            else if (eligibleNobles.Count > 1)
-            {
-                // Nhiều nobles → player phải chọn
-                if (turnComp != null)
-                    turnComp.Phase = TurnPhase.SelectingNoble;
-                // TODO: Lưu danh sách eligible nobles vào component
-            }
-            else
-            {
-                // Không có noble → chuyển turn luôn
-                if (turnComp != null)
-                {
-                    turnComp.Phase = TurnPhase.Completed;
-                    _turnSystem.Execute(context); // ← Chuyển turn
-                }
-            }
-
-            _winSystem.Execute(context);
-
-            // ✅ Lưu và sync
-            await _stateStore.SaveGameContext(roomCode, context);
-            await _redisMapper.SyncGameStateToRedis(context, roomCode);
-
-            return true;
-        }
-        public async Task<bool> SelectNobleAsync(string roomCode, string playerId, Guid nobleId)
-        {
-            var context = await _stateStore.LoadGameContext(roomCode);
-            if (context == null) return false;
-
-            var boardEntity = context.GetEntity<BoardEntity>(context.GameSession.BoardEntityId);
-            var turnComp = boardEntity?.GetComponent<TurnComponent>();
-
-            // Validate đang trong phase SelectingNoble
-            if (turnComp?.Phase != TurnPhase.SelectingNoble)
-                throw new InvalidTurnPhaseException(turnComp?.Phase ?? TurnPhase.WaitingForAction, TurnPhase.SelectingNoble);
-
-            // Validate noble có trong danh sách eligible
-            var eligible = _nobleSystem.GetEligibleNobles(context, playerId);
-            if (!eligible.Contains(nobleId))
-                return false;
-
-            // Assign noble
-            _nobleSystem.AssignNoble(context, playerId, nobleId);
-
-            // Chuyển turn
-            turnComp.Phase = TurnPhase.Completed;
-            _turnSystem.Execute(context);
-
-            // Check win condition
-            _winSystem.Execute(context);
-
-            await _stateStore.SaveGameContext(roomCode, context);
-            await _redisMapper.SyncGameStateToRedis(context, roomCode);
-
-            return true;
-        }
-
-        public async Task<bool> ReserveCardAsync(string roomCode, string playerId, Guid cardId, int? level = null)
-        {
-            var context = await _stateStore.LoadGameContext(roomCode);
-            if (context == null) return false;
-
-            if (!_reserveSystem.CanReserveCard(context, playerId, level, cardId))
-                return false;
-
-            _reserveSystem.ReserveCard(context, playerId, level, cardId);
-
-            // ✅ Reserve card xong → chuyển turn luôn
-            var boardEntity = context.GetEntity<BoardEntity>(context.GameSession.BoardEntityId);
-            var turnComp = boardEntity?.GetComponent<TurnComponent>();
-
-            if (turnComp != null)
-            {
-                turnComp.Phase = TurnPhase.Completed;
-                _turnSystem.Execute(context); // ← Chuyển turn
-                _winSystem.Execute(context);
-            }
-
-            await _stateStore.SaveGameContext(roomCode, context);
-            await _redisMapper.SyncGameStateToRedis(context, roomCode);
-
-            return true;
-        }
-
+        // =====================================================================
+        // DISCARD GEMS
+        // - Chỉ gọi sau CollectGems khi tổng gems > 10
+        // - Sau khi discard xong, DiscardGemSystem tự set phase = Completed nếu <= 10
+        // - Hub sẽ broadcast lại state
+        // =====================================================================
         public async Task<bool> DiscardGemsAsync(string roomCode, string playerId, Dictionary<GemColor, int> gems)
         {
             var context = await _stateStore.LoadGameContext(roomCode);
@@ -274,15 +188,154 @@ namespace CleanArchitecture.Application.Service
 
             _discardSystem.DiscardGem(context, playerId, gems);
 
-            // ✅ DiscardGem đã set phase = Completed nếu <= 10 gems
-            // Chỉ cần gọi Execute để chuyển turn
             var boardEntity = context.GetEntity<BoardEntity>(context.GameSession.BoardEntityId);
             var turnComp = boardEntity?.GetComponent<TurnComponent>();
 
             if (turnComp?.Phase == TurnPhase.Completed)
+                _turnSystem.Execute(context);
+
+            await _stateStore.SaveGameContext(roomCode, context);
+            await _redisMapper.SyncGameStateToRedis(context, roomCode);
+
+            return true;
+        }
+
+        // =====================================================================
+        // PURCHASE CARD
+        // - Validate, mua card, trả gems về bank
+        // - Check noble eligible: 1 → auto assign, nhiều → chờ chọn, 0 → chuyển turn
+        // - Check end game sau khi phase = Completed
+        // =====================================================================
+        public async Task<PurchaseCardResult> PurchaseCardAsync(string roomCode, string playerId, Guid cardId)
+        {
+            var context = await _stateStore.LoadGameContext(roomCode);
+            if (context == null) return new PurchaseCardResult { Success = false };
+
+            if (!_purchaseSystem.CanPurchaseCard(context, playerId, cardId))
+                return new PurchaseCardResult { Success = false };
+
+            _purchaseSystem.PurchaseCard(context, playerId, cardId);
+
+            var boardEntity = context.GetEntity<BoardEntity>(context.GameSession.BoardEntityId);
+            var turnComp = boardEntity?.GetComponent<TurnComponent>();
+            var eligibleNobles = _nobleSystem.GetEligibleNobles(context, playerId);
+
+            bool wasLastRound = turnComp?.IsLastRound ?? false;
+
+            if (eligibleNobles.Count == 1)
             {
-                _turnSystem.Execute(context); // ← Chuyển turn
-                _winSystem.Execute(context);
+                _nobleSystem.AssignNoble(context, playerId, eligibleNobles[0]);
+                if (turnComp != null)
+                {
+                    turnComp.Phase = TurnPhase.Completed;
+                    _endGameSystem.Execute(context);
+                    if (context.GameSession.Status != GameStatus.Completed)
+                        _turnSystem.Execute(context);
+                }
+            }
+            else if (eligibleNobles.Count > 1)
+            {
+                if (turnComp != null)
+                    turnComp.Phase = TurnPhase.SelectingNoble;
+                // Chưa check end game, chờ SelectNoble xong
+            }
+            else
+            {
+                if (turnComp != null)
+                {
+                    turnComp.Phase = TurnPhase.Completed;
+                    _endGameSystem.Execute(context);
+                    if (context.GameSession.Status != GameStatus.Completed)
+                        _turnSystem.Execute(context);
+                }
+            }
+
+            bool isGameOver = context.GameSession.Status == GameStatus.Completed;
+            bool justTriggeredLastRound = !wasLastRound && (turnComp?.IsLastRound ?? false);
+
+            await _stateStore.SaveGameContext(roomCode, context);
+            await _redisMapper.SyncGameStateToRedis(context, roomCode);
+
+            return new PurchaseCardResult
+            {
+                Success = true,
+                NeedsSelectNoble = eligibleNobles.Count > 1,
+                EligibleNobles = eligibleNobles.Count > 1 ? eligibleNobles : new(),
+                IsGameOver = isGameOver,
+                JustTriggeredLastRound = justTriggeredLastRound,
+                Winner = isGameOver ? context.GameSession.WinnerId : null
+            };
+        }
+
+        // =====================================================================
+        // SELECT NOBLE
+        // - Chỉ gọi sau PurchaseCard khi có nhiều noble eligible
+        // - Assign noble được chọn → chuyển turn → check end game
+        // =====================================================================
+        public async Task<SelectNobleResult> SelectNobleAsync(string roomCode, string playerId, Guid nobleId)
+        {
+            var context = await _stateStore.LoadGameContext(roomCode);
+            if (context == null) return new SelectNobleResult { Success = false };
+
+            var boardEntity = context.GetEntity<BoardEntity>(context.GameSession.BoardEntityId);
+            var turnComp = boardEntity?.GetComponent<TurnComponent>();
+
+            if (turnComp?.Phase != TurnPhase.SelectingNoble)
+                throw new InvalidTurnPhaseException(turnComp?.Phase ?? TurnPhase.WaitingForAction, TurnPhase.SelectingNoble);
+
+            var eligible = _nobleSystem.GetEligibleNobles(context, playerId);
+            if (!eligible.Contains(nobleId))
+                return new SelectNobleResult { Success = false };
+
+            bool wasLastRound = turnComp.IsLastRound;
+
+            _nobleSystem.AssignNoble(context, playerId, nobleId);
+            turnComp.Phase = TurnPhase.Completed;
+
+            _endGameSystem.Execute(context);
+
+            bool isGameOver = context.GameSession.Status == GameStatus.Completed;
+            bool justTriggeredLastRound = !wasLastRound && turnComp.IsLastRound;
+
+            if (!isGameOver)
+                _turnSystem.Execute(context);
+
+            await _stateStore.SaveGameContext(roomCode, context);
+            await _redisMapper.SyncGameStateToRedis(context, roomCode);
+
+            return new SelectNobleResult
+            {
+                Success = true,
+                IsGameOver = isGameOver,
+                JustTriggeredLastRound = justTriggeredLastRound,
+                Winner = isGameOver ? context.GameSession.WinnerId : null
+            };
+        }
+
+        // =====================================================================
+        // RESERVE CARD
+        // - Giữ card từ board hoặc rút blind từ deck theo level
+        // - Nhận gold gem nếu bank còn
+        // - Chuyển turn ngay, không có bước phụ
+        // - Reserve không thể trigger win nên không cần check EndGame
+        // =====================================================================
+        public async Task<bool> ReserveCardAsync(string roomCode, string playerId, Guid cardId, int? level = null)
+        {
+            var context = await _stateStore.LoadGameContext(roomCode);
+            if (context == null) return false;
+
+            if (!_reserveSystem.CanReserveCard(context, playerId, level, cardId))
+                return false;
+
+            _reserveSystem.ReserveCard(context, playerId, level, cardId);
+
+            var boardEntity = context.GetEntity<BoardEntity>(context.GameSession.BoardEntityId);
+            var turnComp = boardEntity?.GetComponent<TurnComponent>();
+
+            if (turnComp != null)
+            {
+                turnComp.Phase = TurnPhase.Completed;
+                _turnSystem.Execute(context);
             }
 
             await _stateStore.SaveGameContext(roomCode, context);
@@ -291,17 +344,19 @@ namespace CleanArchitecture.Application.Service
             return true;
         }
 
+        // =====================================================================
+        // END TURN (manual fallback)
+        // =====================================================================
         public async Task EndTurnAsync(string roomCode, string playerId)
         {
             var context = await _stateStore.LoadGameContext(roomCode);
             if (context == null) return;
 
             var boardEntity = context.GetEntity<BoardEntity>(context.GameSession.BoardEntityId);
-            var turnComponent = boardEntity?.GetComponent<TurnComponent>();
-            if (turnComponent != null)
-            {
-                turnComponent.Phase = TurnPhase.Completed;
-            }
+            var turnComp = boardEntity?.GetComponent<TurnComponent>();
+
+            if (turnComp != null)
+                turnComp.Phase = TurnPhase.Completed;
 
             _turnSystem.Execute(context);
             await _stateStore.SaveGameContext(roomCode, context);

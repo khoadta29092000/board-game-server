@@ -1,7 +1,6 @@
 ﻿using CleanArchitecture.Application.IRepository;
 using CleanArchitecture.Application.IService;
-using CleanArchitecture.Domain.Exceptions;
-using CleanArchitecture.Domain.Model.Room;
+using CleanArchitecture.Domain.DTO.Splendor;
 using CleanArchitecture.Domain.Model.Splendor.Enum;
 using CleanArchitecture.Infrastructure.Redis;
 using Microsoft.AspNetCore.Authorization;
@@ -30,6 +29,9 @@ namespace Splendor_Game_Server.Hubs
             _logger = logger;
         }
 
+        // =====================================================================
+        // JOIN GAME
+        // =====================================================================
         public async Task<object> JoinGame(string gameId, string playerId)
         {
             try
@@ -38,9 +40,7 @@ namespace Splendor_Game_Server.Hubs
 
                 var players = await _redisMapper.GetPlayers(gameId);
                 if (!players.ContainsKey(playerId))
-                {
                     throw new HubException("You are not a participant of this game");
-                }
 
                 await Groups.AddToGroupAsync(Context.ConnectionId, $"game:{gameId}");
                 await _userConnectionService.AddUserConnection(playerId, Context.ConnectionId, gameId);
@@ -64,13 +64,6 @@ namespace Splendor_Game_Server.Hubs
 
                 await Clients.Caller.SendAsync("GameStateLoaded", response);
 
-                // Notify others
-                //await Clients.OthersInGroup($"game:{gameId}").SendAsync("PlayerJoined", new
-                //{
-                //    playerId = playerId,
-                //    timestamp = DateTime.UtcNow
-                //});
-
                 _logger.LogInformation("✅ Player {PlayerId} joined game {GameId}", playerId, gameId);
                 return new { room = response, success = true };
             }
@@ -78,12 +71,13 @@ namespace Splendor_Game_Server.Hubs
             {
                 _logger.LogError(ex, "❌ Error joining game {GameId} for player {PlayerId}", gameId, playerId);
                 await Clients.Caller.SendAsync("Error", new { message = ex.Message, code = "JOIN_GAME_ERROR" });
-                return  new { message = ex.Message, success = false};
+                return new { message = ex.Message, success = false };
             }
         }
 
-       
-
+        // =====================================================================
+        // LEAVE GAME
+        // =====================================================================
         public async Task LeaveGame(string roomCode, string playerId)
         {
             try
@@ -93,7 +87,7 @@ namespace Splendor_Game_Server.Hubs
 
                 await Clients.Group($"game:{roomCode}").SendAsync("PlayerLeft", new
                 {
-                    playerId = playerId,
+                    playerId,
                     timestamp = DateTime.UtcNow
                 });
 
@@ -105,6 +99,9 @@ namespace Splendor_Game_Server.Hubs
             }
         }
 
+        // =====================================================================
+        // DISCONNECT
+        // =====================================================================
         public override async Task OnDisconnectedAsync(Exception? exception)
         {
             try
@@ -131,24 +128,206 @@ namespace Splendor_Game_Server.Hubs
 
             await base.OnDisconnectedAsync(exception);
         }
+
+        // =====================================================================
+        // COLLECT GEM
+        // - Nếu tổng gems > 10 → báo riêng caller NeedDiscard
+        // - Nếu ok → broadcast state, turn tự đổi
+        // =====================================================================
         public async Task<object> CollectGem(string gameId, string playerId, Dictionary<GemColor, int> gems)
         {
             try
             {
-                var result = await _gameService.CollectGemsAsync(gameId, playerId, gems);
-                var newGameState = BroadcastGameState(gameId);
-                await Clients.Group($"Game_{gameId}")
-                   .SendAsync("TurnChange", new { message = result });
-                return new { result, success = true };
+                CollectGemResult result = await _gameService.CollectGemsAsync(gameId, playerId, gems);
+
+                if (!result.Success)
+                {
+                    await Clients.Caller.SendAsync("Error", new { message = "Cannot collect gems.", code = "COLLECT_GEM_ERROR" });
+                    return new { success = false };
+                }
+
+                await BroadcastGameState(gameId);
+
+                if (result.NeedsDiscard)
+                {
+                    await Clients.Caller.SendAsync("NeedDiscard", new
+                    {
+                        currentGems = result.CurrentGems,
+                        excessCount = result.TotalGems - 10
+                    });
+                }
+
+                return new { success = true };
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "❌ Error collecting gem {GameId} {PlayerId}", gameId, playerId);
                 await Clients.Caller.SendAsync("Error", new { message = ex.Message, code = "COLLECT_GEM_ERROR" });
-                return new { message = ex.Message, success = false };
+                return new { success = false, message = ex.Message };
             }
         }
 
+        // =====================================================================
+        // DISCARD GEM
+        // - Chỉ gọi sau NeedDiscard
+        // - Broadcast lại state sau khi discard xong
+        // =====================================================================
+        public async Task<object> DiscardGem(string gameId, string playerId, Dictionary<GemColor, int> gems)
+        {
+            try
+            {
+                bool success = await _gameService.DiscardGemsAsync(gameId, playerId, gems);
+
+                if (!success)
+                {
+                    await Clients.Caller.SendAsync("Error", new { message = "Invalid discard action.", code = "DISCARD_GEM_ERROR" });
+                    return new { success = false };
+                }
+
+                await BroadcastGameState(gameId);
+
+                return new { success = true };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error discarding gem {GameId} {PlayerId}", gameId, playerId);
+                await Clients.Caller.SendAsync("Error", new { message = ex.Message, code = "DISCARD_GEM_ERROR" });
+                return new { success = false, message = ex.Message };
+            }
+        }
+
+        // =====================================================================
+        // PURCHASE CARD
+        // - 1 noble → auto assign, chuyển turn
+        // - Nhiều noble → gửi NeedSelectNoble riêng caller
+        // - 0 noble → chuyển turn
+        // - Check last round & game over
+        // =====================================================================
+        public async Task<object> PurchaseCard(string gameId, string playerId, Guid cardId)
+        {
+            try
+            {
+                PurchaseCardResult result = await _gameService.PurchaseCardAsync(gameId, playerId, cardId);
+
+                if (!result.Success)
+                {
+                    await Clients.Caller.SendAsync("Error", new { message = "Cannot purchase card.", code = "PURCHASE_CARD_ERROR" });
+                    return new { success = false };
+                }
+
+                await BroadcastGameState(gameId);
+
+                if (result.IsGameOver)
+                {
+                    await Clients.Group($"game:{gameId}").SendAsync("GameOver", new
+                    {
+                        winner = result.Winner
+                    });
+                }
+                else
+                {
+                    if (result.JustTriggeredLastRound)
+                    {
+                        await Clients.Group($"game:{gameId}").SendAsync("LastRound", new
+                        {
+                            triggeredBy = playerId
+                        });
+                    }
+
+                    if (result.NeedsSelectNoble)
+                    {
+                        await Clients.Caller.SendAsync("NeedSelectNoble", new
+                        {
+                            eligibleNobles = result.EligibleNobles
+                        });
+                    }
+                }
+
+                return new { success = true };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error purchasing card {GameId} {PlayerId}", gameId, playerId);
+                await Clients.Caller.SendAsync("Error", new { message = ex.Message, code = "PURCHASE_CARD_ERROR" });
+                return new { success = false, message = ex.Message };
+            }
+        }
+
+        // =====================================================================
+        // SELECT NOBLE
+        // - Chỉ gọi sau NeedSelectNoble
+        // - Assign noble → chuyển turn → check end game
+        // =====================================================================
+        public async Task<object> SelectNoble(string gameId, string playerId, Guid nobleId)
+        {
+            try
+            {
+                SelectNobleResult result = await _gameService.SelectNobleAsync(gameId, playerId, nobleId);
+
+                if (!result.Success)
+                {
+                    await Clients.Caller.SendAsync("Error", new { message = "Cannot select noble.", code = "SELECT_NOBLE_ERROR" });
+                    return new { success = false };
+                }
+
+                await BroadcastGameState(gameId);
+
+                if (result.IsGameOver)
+                {
+                    await Clients.Group($"game:{gameId}").SendAsync("GameOver", new
+                    {
+                        winner = result.Winner
+                    });
+                }
+                else if (result.JustTriggeredLastRound)
+                {
+                    await Clients.Group($"game:{gameId}").SendAsync("LastRound", new
+                    {
+                        triggeredBy = playerId
+                    });
+                }
+
+                return new { success = true };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error selecting noble {GameId} {PlayerId}", gameId, playerId);
+                await Clients.Caller.SendAsync("Error", new { message = ex.Message, code = "SELECT_NOBLE_ERROR" });
+                return new { success = false, message = ex.Message };
+            }
+        }
+
+        // =====================================================================
+        // RESERVE CARD
+        // - Giữ card, nhận gold nếu có, chuyển turn ngay
+        // =====================================================================
+        public async Task<object> ReserveCard(string gameId, string playerId, Guid cardId, int? level = null)
+        {
+            try
+            {
+                bool success = await _gameService.ReserveCardAsync(gameId, playerId, cardId, level);
+
+                if (!success)
+                {
+                    await Clients.Caller.SendAsync("Error", new { message = "Cannot reserve card.", code = "RESERVE_CARD_ERROR" });
+                    return new { success = false };
+                }
+
+                await BroadcastGameState(gameId);
+
+                return new { success = true };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error reserving card {GameId} {PlayerId}", gameId, playerId);
+                await Clients.Caller.SendAsync("Error", new { message = ex.Message, code = "RESERVE_CARD_ERROR" });
+                return new { success = false, message = ex.Message };
+            }
+        }
+
+        // =====================================================================
+        // BROADCAST GAME STATE (internal)
+        // =====================================================================
         private async Task BroadcastGameState(string roomCode)
         {
             try

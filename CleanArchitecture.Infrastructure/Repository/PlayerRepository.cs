@@ -36,7 +36,7 @@ namespace CleanArchitecture.Infrastructure.Repository
 
             _verificationCollection = mongoDatabase.GetCollection<VerificationCode>(
                 playerStoreDatabaseSettings.Value.VerificationCodesCollectionName);
-            CreateTTLIndex().Wait();
+            CreateTTLIndex().GetAwaiter().GetResult();
 
             _playersCollection = mongoDatabase.GetCollection<Player>(
                 playerStoreDatabaseSettings.Value.PlayersCollectionName);

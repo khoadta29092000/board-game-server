@@ -20,6 +20,7 @@ namespace CleanArchitecture.Domain.Model.Splendor.Components
         public Dictionary<GemColor, int> Gems { get; set; }
         public Dictionary<GemColor, int> Bonuses { get; set; }
         public List<Guid> ReservedCards { get; set; }
+        public List<Guid> PurchaseCards { get; set; }
 
         // ⬇️ THÊM constructor rỗng
         [JsonConstructor]
@@ -31,6 +32,7 @@ namespace CleanArchitecture.Domain.Model.Splendor.Components
             Gems = new Dictionary<GemColor, int>();
             Bonuses = new Dictionary<GemColor, int>();
             ReservedCards = new List<Guid>();
+            PurchaseCards = new List<Guid>();
         }
 
         public PlayerComponent(string playerId, string name)
@@ -56,6 +58,7 @@ namespace CleanArchitecture.Domain.Model.Splendor.Components
                 { GemColor.Black, 0 }
             };
             ReservedCards = new List<Guid>();
+            PurchaseCards = new List<Guid>();
         }
     }
 

@@ -83,6 +83,11 @@ namespace CleanArchitecture.Infrastructure.Redis
                     .Where(c => c != null)
                     .ToList();
 
+                var purcharseCardsInfo = playerComp.PurchaseCards
+                    .Select(cardId => MapCardForClient(context, cardId))
+                    .Where(c => c != null)
+                    .ToList();
+
                 var playerData = new
                 {
                     playerId = playerComp.PlayerId,
@@ -91,6 +96,7 @@ namespace CleanArchitecture.Infrastructure.Redis
                     gems = playerComp.Gems,
                     bonuses = playerComp.Bonuses,
                     reservedCards = reservedCardsInfo,
+                    purchasedCards = purcharseCardsInfo,
                     // Note: ownedCards có thể tính từ bonuses nếu không track riêng
                     totalOwnedCards = playerComp.Bonuses.Values.Sum()
                 };
@@ -239,32 +245,72 @@ namespace CleanArchitecture.Infrastructure.Redis
         public async Task<string?> GetCardDecks(string gameId)
         {
             var boardJson = await GetBoard(gameId);
-
             if (string.IsNullOrEmpty(boardJson))
                 return null;
-
             try
             {
                 using var doc = JsonDocument.Parse(boardJson);
-
                 var root = doc.RootElement;
 
-                var visibleCards = root.GetProperty("visibleCards");
-
+                // Lấy từ board.visibleCards
+                var board = root.GetProperty("board");
+                var visibleCards = board.GetProperty("visibleCards");
                 int level1Visible = visibleCards.GetProperty("level1").GetArrayLength();
                 int level2Visible = visibleCards.GetProperty("level2").GetArrayLength();
                 int level3Visible = visibleCards.GetProperty("level3").GetArrayLength();
 
-                // Tổng số lá chuẩn Splendor
+                // Đếm reservedCards từ players (object, không phải array)
+                int level1Used = 0, level2Used = 0, level3Used = 0;
+
+                if (root.TryGetProperty("players", out var players))
+                {
+                    // players là Dictionary → dùng EnumerateObject()
+                    foreach (var playerProp in players.EnumerateObject())
+                    {
+                        var player = playerProp.Value;
+
+                        // reservedCards: array of card objects có field "level"
+                        if (player.TryGetProperty("reservedCards", out var reservedCards))
+                        {
+                            foreach (var card in reservedCards.EnumerateArray())
+                            {
+                                if (card.TryGetProperty("level", out var levelProp))
+                                {
+                                    var level = levelProp.GetInt32();
+                                    if (level == 1) level1Used++;
+                                    else if (level == 2) level2Used++;
+                                    else if (level == 3) level3Used++;
+                                }
+                            }
+                        }
+
+                        // totalOwnedCards không đủ chi tiết theo level
+                        // Nếu backend trả về purchasedCards array thì xử lý tương tự reservedCards
+                        if (player.TryGetProperty("purchasedCards", out var purchasedCards))
+                        {
+                            foreach (var card in purchasedCards.EnumerateArray())
+                            {
+                                if (card.TryGetProperty("level", out var levelProp))
+                                {
+                                    var level = levelProp.GetInt32();
+                                    if (level == 1) level1Used++;
+                                    else if (level == 2) level2Used++;
+                                    else if (level == 3) level3Used++;
+                                }
+                            }
+                        }
+                    }
+                }
+
                 const int TOTAL_LEVEL1 = 40;
                 const int TOTAL_LEVEL2 = 30;
                 const int TOTAL_LEVEL3 = 20;
 
                 var result = new
                 {
-                    level1 = TOTAL_LEVEL1 - level1Visible,
-                    level2 = TOTAL_LEVEL2 - level2Visible,
-                    level3 = TOTAL_LEVEL3 - level3Visible
+                    level1 = TOTAL_LEVEL1 - level1Visible - level1Used,
+                    level2 = TOTAL_LEVEL2 - level2Visible - level2Used,
+                    level3 = TOTAL_LEVEL3 - level3Visible - level3Used
                 };
 
                 return JsonSerializer.Serialize(result);

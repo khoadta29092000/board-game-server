@@ -92,6 +92,7 @@ namespace CleanArchitecture.Domain.Model.Splendor.System
             // Add card benefits
             playerComponent.PrestigePoints += cardComponent.PrestigePoints;
             playerComponent.Bonuses[cardComponent.BonusColor] = playerComponent.Bonuses.GetValueOrDefault(cardComponent.BonusColor, 0) + 1;
+            playerComponent.PurchaseCards.Add(cardId);
 
             // Remove card from visible list (if exists)
             if (playerComponent.ReservedCards.Contains(cardId))

@@ -410,7 +410,6 @@ namespace Splendor_Game_Server.Hubs
                     return;
                 }
 
-                // Gửi GameStateUpdated với state=Completed để FE hiện GameOverOverlay
                 var completedResponse = new
                 {
                     info = new
@@ -433,7 +432,18 @@ namespace Splendor_Game_Server.Hubs
                             totalOwnedCards = kv.Value.Stats.Contains("purchasedCards")
                                 ? kv.Value.Stats["purchasedCards"].AsInt32
                                 : 0,
-                            bonuses = new { }
+                            // Đọc gems dict từ Stats
+                            gems = kv.Value.Stats.Contains("gems") && kv.Value.Stats["gems"].IsBsonDocument
+                                ? kv.Value.Stats["gems"].AsBsonDocument
+                                    .ToDictionary(e => e.Name, e => e.Value.ToInt32())
+                                : new Dictionary<string, int>(),
+                            // Đọc bonuses dict từ Stats
+                            bonuses = kv.Value.Stats.Contains("bonuses") && kv.Value.Stats["bonuses"].IsBsonDocument
+                                ? kv.Value.Stats["bonuses"].AsBsonDocument
+                                    .ToDictionary(e => e.Name, e => e.Value.ToInt32())
+                                : new Dictionary<string, int>(),
+                            reservedCards = new List<object>(),
+                            purchasedCards = new List<object>(),
                         }
                     ),
                     board = (object?)null,

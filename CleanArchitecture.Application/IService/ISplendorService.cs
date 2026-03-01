@@ -15,7 +15,7 @@ namespace CleanArchitecture.Application.IService
         Task<CollectGemResult> CollectGemsAsync(string roomCode, string playerId, Dictionary<GemColor, int> gems);
         Task<PurchaseCardResult> PurchaseCardAsync(string roomCode, string playerId, Guid cardId);
         Task<SelectNobleResult> SelectNobleAsync(string roomCode, string playerId, Guid nobleId);
-        Task<bool> ReserveCardAsync(string roomCode, string playerId, Guid cardId, int? level = null);
+        Task<bool> ReserveCardAsync(string roomCode, string playerId, Guid? cardId, int? level = null);
         Task<bool> DiscardGemsAsync(string roomCode, string playerId, Dictionary<GemColor, int> gems);
         Task EndTurnAsync(string roomCode, string playerId);
     }

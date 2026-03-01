@@ -319,7 +319,7 @@ namespace CleanArchitecture.Application.Service
         // - Chuyển turn ngay, không có bước phụ
         // - Reserve không thể trigger win nên không cần check EndGame
         // =====================================================================
-        public async Task<bool> ReserveCardAsync(string roomCode, string playerId, Guid cardId, int? level = null)
+        public async Task<bool> ReserveCardAsync(string roomCode, string playerId, Guid? cardId, int? level = null)
         {
             var context = await _stateStore.LoadGameContext(roomCode);
             if (context == null) return false;

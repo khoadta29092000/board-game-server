@@ -352,29 +352,46 @@ namespace CleanArchitecture.Application.Service
         // - Chuyển turn ngay, không có bước phụ
         // - Reserve không thể trigger win nên không cần check EndGame
         // =====================================================================
-        public async Task<bool> ReserveCardAsync(string roomCode, string playerId, Guid? cardId, int? level = null)
+        public async Task<ReserveCardResult> ReserveCardAsync(string roomCode, string playerId, Guid? cardId, int? level = null)
         {
             var context = await _stateStore.LoadGameContext(roomCode);
-            if (context == null) return false;
+            if (context == null) return new ReserveCardResult { Success = false };
 
             if (!_reserveSystem.CanReserveCard(context, playerId, level, cardId))
-                return false;
+                return new ReserveCardResult { Success = false };
 
             _reserveSystem.ReserveCard(context, playerId, level, cardId);
 
             var boardEntity = context.GetEntity<BoardEntity>(context.GameSession.BoardEntityId);
             var turnComp = boardEntity?.GetComponent<TurnComponent>();
 
-            if (turnComp != null)
+            // Check gems sau khi nhận gold từ reserve
+            var player = context.GameSession.PlayerEntityIds
+                .Select(id => context.GetEntity<PlayerEntity>(id))
+                .FirstOrDefault(p => p?.GetComponent<PlayerComponent>()?.PlayerId == playerId)
+                ?.GetComponent<PlayerComponent>();
+
+            int totalGems = player?.Gems.Values.Sum() ?? 0;
+            bool needsDiscard = totalGems > 10;
+
+            if (!needsDiscard && turnComp != null)
             {
+                // Gems ok → chuyển turn ngay
                 turnComp.Phase = TurnPhase.Completed;
                 _turnSystem.Execute(context);
             }
+            // Nếu needsDiscard → giữ nguyên phase WaitingForAction, chờ discard
 
             await _stateStore.SaveGameContext(roomCode, context);
             await _redisMapper.SyncGameStateToRedis(context, roomCode);
 
-            return true;
+            return new ReserveCardResult
+            {
+                Success = true,
+                NeedsDiscard = needsDiscard,
+                TotalGems = totalGems,
+                CurrentGems = player?.Gems ?? new Dictionary<GemColor, int>()
+            };
         }
 
         // =====================================================================

@@ -3,6 +3,7 @@ using CleanArchitecture.Application.IService;
 using CleanArchitecture.Domain.DTO.Splendor;
 using CleanArchitecture.Domain.Model.Splendor.Enum;
 using CleanArchitecture.Infrastructure.Redis;
+using GreenDonut;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using System.Text.Json;
@@ -340,15 +341,26 @@ namespace Splendor_Game_Server.Hubs
         {
             try
             {
-                bool success = await _gameService.ReserveCardAsync(gameId, playerId, cardId, level);
+                ReserveCardResult result = await _gameService.ReserveCardAsync(gameId, playerId, cardId, level);
 
-                if (!success)
+                if (!result.Success)
                 {
                     await Clients.Caller.SendAsync("Error", new { message = "Cannot reserve card.", code = "RESERVE_CARD_ERROR" });
                     return new { success = false };
                 }
 
                 await BroadcastGameState(gameId);
+
+
+                if (result.NeedsDiscard)
+                {
+                    // Giống CollectGem — gửi riêng cho caller
+                    await Clients.Caller.SendAsync("NeedDiscard", new
+                    {
+                        currentGems = result.CurrentGems,
+                        excessCount = result.TotalGems - 10
+                    });
+                }
 
                 return new { success = true };
             }

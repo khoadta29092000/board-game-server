@@ -228,25 +228,22 @@ namespace CleanArchitecture.Application.Service
                 if (turnComp != null)
                 {
                     turnComp.Phase = TurnPhase.Completed;
-                    _endGameSystem.Execute(context);
-                    if (context.GameSession.Status != GameStatus.Completed)
-                        _turnSystem.Execute(context);
+                    _turnSystem.Execute(context);      // ← tăng index trước
+                    _endGameSystem.Execute(context);   // ← check sau
                 }
             }
             else if (eligibleNobles.Count > 1)
             {
                 if (turnComp != null)
                     turnComp.Phase = TurnPhase.SelectingNoble;
-                // Chưa check end game, chờ SelectNoble xong
             }
             else
             {
                 if (turnComp != null)
                 {
                     turnComp.Phase = TurnPhase.Completed;
-                    _endGameSystem.Execute(context);
-                    if (context.GameSession.Status != GameStatus.Completed)
-                        _turnSystem.Execute(context);
+                    _turnSystem.Execute(context);      // ← tăng index trước
+                    _endGameSystem.Execute(context);   // ← check sau
                 }
             }
 
@@ -290,15 +287,15 @@ namespace CleanArchitecture.Application.Service
             bool wasLastRound = turnComp.IsLastRound;
 
             _nobleSystem.AssignNoble(context, playerId, nobleId);
-            turnComp.Phase = TurnPhase.Completed;
+            turnComp.Phase = TurnPhase.Completed; // ← set trước khi turn/endgame
 
-            _endGameSystem.Execute(context);
+            _turnSystem.Execute(context);     // tăng index
+            _endGameSystem.Execute(context);  // check game over với index mới
 
             bool isGameOver = context.GameSession.Status == GameStatus.Completed;
             bool justTriggeredLastRound = !wasLastRound && turnComp.IsLastRound;
 
-            if (!isGameOver)
-                _turnSystem.Execute(context);
+            // KHÔNG gọi _turnSystem lần 2
 
             await _stateStore.SaveGameContext(roomCode, context);
             await _redisMapper.SyncGameStateToRedis(context, roomCode);
@@ -319,7 +316,7 @@ namespace CleanArchitecture.Application.Service
         // - Chuyển turn ngay, không có bước phụ
         // - Reserve không thể trigger win nên không cần check EndGame
         // =====================================================================
-        public async Task<bool> ReserveCardAsync(string roomCode, string playerId, Guid cardId, int? level = null)
+        public async Task<bool> ReserveCardAsync(string roomCode, string playerId, Guid? cardId, int? level = null)
         {
             var context = await _stateStore.LoadGameContext(roomCode);
             if (context == null) return false;

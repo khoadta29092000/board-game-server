@@ -16,29 +16,24 @@ namespace CleanArchitecture.Domain.Model.Splendor.System
             if (turnComp == null) return;
 
             bool hasPlayerWith15Points = CheckIfAnyPlayerHas15Points(context);
+            if (!hasPlayerWith15Points) return;
 
-            if (hasPlayerWith15Points)
+            if (!turnComp.IsLastRound)
             {
-                if (!turnComp.IsLastRound)
-                {
-                    turnComp.IsLastRound = true;
-                    turnComp.LastRoundStartPlayerIndex = turnComp.CurrentPlayerIndex;
-                    return;
-                }
+                turnComp.IsLastRound = true;
+                // CurrentPlayerIndex đã tăng sau TurnSystem
+                // LastRoundStartPlayerIndex = index của player tiếp theo (người bắt đầu last round)
+                turnComp.LastRoundStartPlayerIndex = turnComp.CurrentPlayerIndex;
+                return;
+            }
 
-                bool isBackToStartPlayer = turnComp.CurrentPlayerIndex == turnComp.LastRoundStartPlayerIndex;
-                bool hasTurnCompleted = turnComp.Phase == TurnPhase.Completed;
-
-                if (isBackToStartPlayer && hasTurnCompleted)
-                {
-                    var winner = DetermineFinalWinner(context);
-
-                    // SỬ DỤNG METHOD THAY VÌ SET TRỰC TIẾP
-                    if (winner != null)
-                    {
-                        context.GameSession.CompleteGame(winner);
-                    }
-                }
+            // Game over khi quay lại đúng người bắt đầu last round
+            bool isBackToStart = turnComp.CurrentPlayerIndex == turnComp.LastRoundStartPlayerIndex;
+            if (isBackToStart)
+            {
+                var winner = DetermineFinalWinner(context);
+                if (winner != null)
+                    context.GameSession.CompleteGame(winner);
             }
         }
 

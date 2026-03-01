@@ -301,7 +301,7 @@ namespace Splendor_Game_Server.Hubs
         // RESERVE CARD
         // - Giữ card, nhận gold nếu có, chuyển turn ngay
         // =====================================================================
-        public async Task<object> ReserveCard(string gameId, string playerId, Guid cardId, int? level = null)
+        public async Task<object> ReserveCard(string gameId, string playerId, Guid? cardId, int? level = null)
         {
             try
             {

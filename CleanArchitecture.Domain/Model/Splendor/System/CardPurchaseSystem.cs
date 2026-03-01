@@ -81,6 +81,7 @@ namespace CleanArchitecture.Domain.Model.Splendor.System
                     var goldHave = playerComponent.Gems.GetValueOrDefault(GemColor.Gold, 0);
                     var useGold = Math.Min(goldHave, needed);
                     playerComponent.Gems[GemColor.Gold] = goldHave - useGold;
+                    boardComponent.AvailableGems[GemColor.Gold] = boardComponent.AvailableGems.GetValueOrDefault(GemColor.Gold, 0) + useGold;
                     needed -= useGold;
                 }
 
@@ -115,13 +116,6 @@ namespace CleanArchitecture.Domain.Model.Splendor.System
                         break;
                     }
                 }
-            }
-            // After purchase, check nobles for this player
-            var eligible = _nobleVisitSystem.GetEligibleNobles(context, playerId);
-            if (eligible.Any())
-            {
-                // auto assign first eligible (or your policy)
-                _nobleVisitSystem.AssignNoble(context, playerId, eligible.First());
             }
         }
 

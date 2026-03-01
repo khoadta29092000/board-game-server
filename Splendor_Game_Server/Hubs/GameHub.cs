@@ -15,22 +15,26 @@ namespace Splendor_Game_Server.Hubs
         private readonly ISplendorService _gameService;
         private readonly IRedisMapper _redisMapper;
         private readonly IUserConnectionService _userConnectionService;
+        private readonly IGameHistoryService _historyService;
         private readonly ILogger<GameHub> _logger;
 
         public GameHub(
             ISplendorService gameService,
             IRedisMapper redisMapper,
             IUserConnectionService userConnectionService,
+            IGameHistoryService historyService,
             ILogger<GameHub> logger)
         {
             _gameService = gameService;
             _redisMapper = redisMapper;
             _userConnectionService = userConnectionService;
+            _historyService = historyService;
             _logger = logger;
         }
 
         // =====================================================================
         // JOIN GAME
+        // Thứ tự: Redis trước → nếu không có thì check MongoDB history
         // =====================================================================
         public async Task<object> JoinGame(string gameId, string playerId)
         {
@@ -38,34 +42,77 @@ namespace Splendor_Game_Server.Hubs
             {
                 _logger.LogInformation("🎮 Player {PlayerId} joining game {GameId}", playerId, gameId);
 
-                var players = await _redisMapper.GetPlayers(gameId);
-                if (!players.ContainsKey(playerId))
-                    throw new HubException("You are not a participant of this game");
-
                 await Groups.AddToGroupAsync(Context.ConnectionId, $"game:{gameId}");
                 await _userConnectionService.AddUserConnection(playerId, Context.ConnectionId, gameId);
 
-                var info = await _redisMapper.GetGameInfo(gameId);
-                var board = await _redisMapper.GetBoard(gameId);
-                var turn = await _redisMapper.GetTurn(gameId);
-                var cardDecks = await _redisMapper.GetCardDecks(gameId);
-
-                var response = new
+                // 1. Thử load từ Redis (game đang chạy)
+                var players = await _redisMapper.GetPlayers(gameId);
+                if (players != null && players.ContainsKey(playerId))
                 {
-                    info = info != null ? JsonSerializer.Deserialize<object>(info) : null,
-                    players = players.ToDictionary(
-                        kv => kv.Key,
-                        kv => JsonSerializer.Deserialize<object>(kv.Value)
-                    ),
-                    board = board != null ? JsonSerializer.Deserialize<object>(board) : null,
-                    turn = turn != null ? JsonSerializer.Deserialize<object>(turn) : null,
-                    cardDecks = cardDecks != null ? JsonSerializer.Deserialize<object>(cardDecks) : null,
-                };
+                    var info = await _redisMapper.GetGameInfo(gameId);
+                    var board = await _redisMapper.GetBoard(gameId);
+                    var turn = await _redisMapper.GetTurn(gameId);
+                    var cardDecks = await _redisMapper.GetCardDecks(gameId);
 
-                await Clients.Caller.SendAsync("GameStateLoaded", response);
+                    var response = new
+                    {
+                        info = info != null ? JsonSerializer.Deserialize<object>(info) : null,
+                        players = players.ToDictionary(
+                            kv => kv.Key,
+                            kv => JsonSerializer.Deserialize<object>(kv.Value)
+                        ),
+                        board = board != null ? JsonSerializer.Deserialize<object>(board) : null,
+                        turn = turn != null ? JsonSerializer.Deserialize<object>(turn) : null,
+                        cardDecks = cardDecks != null ? JsonSerializer.Deserialize<object>(cardDecks) : null,
+                    };
 
-                _logger.LogInformation("✅ Player {PlayerId} joined game {GameId}", playerId, gameId);
-                return new { room = response, success = true };
+                    await Clients.Caller.SendAsync("GameStateLoaded", response);
+                    _logger.LogInformation("✅ Player {PlayerId} joined game {GameId} from Redis", playerId, gameId);
+                    return new { success = true };
+                }
+
+                // 2. Redis không có → check MongoDB history (game đã kết thúc)
+                var history = await _historyService.GetByGameIdAsync(gameId);
+                if (history != null && history.State == "Completed")
+                {
+                    // Trả về minimal state để FE hiện GameOverOverlay
+                    var completedResponse = new
+                    {
+                        info = new
+                        {
+                            gameId = history.GameId,
+                            state = history.State,
+                            winnerId = history.WinnerId,
+                            players = history.PlayerOrder,
+                            completedAt = history.CompletedAt
+                        },
+                        players = history.Players.ToDictionary(
+                            kv => kv.Key,
+                            kv => (object)new
+                            {
+                                playerId = kv.Value.PlayerId,
+                                name = kv.Value.Name,
+                                points = kv.Value.Score,
+                                rank = kv.Value.Rank,
+                                isWinner = kv.Value.IsWinner,
+                                totalOwnedCards = kv.Value.Stats.Contains("purchasedCards")
+                                    ? kv.Value.Stats["purchasedCards"].AsInt32
+                                    : 0,
+                                bonuses = new { }
+                            }
+                        ),
+                        board = (object?)null,
+                        turn = (object?)null,
+                        cardDecks = (object?)null,
+                    };
+
+                    await Clients.Caller.SendAsync("GameStateLoaded", completedResponse);
+                    _logger.LogInformation("✅ Player {PlayerId} rejoined completed game {GameId} from MongoDB", playerId, gameId);
+                    return new { success = true };
+                }
+
+                // 3. Không tìm thấy
+                throw new HubException("Game not found");
             }
             catch (Exception ex)
             {
@@ -131,8 +178,6 @@ namespace Splendor_Game_Server.Hubs
 
         // =====================================================================
         // COLLECT GEM
-        // - Nếu tổng gems > 10 → báo riêng caller NeedDiscard
-        // - Nếu ok → broadcast state, turn tự đổi
         // =====================================================================
         public async Task<object> CollectGem(string gameId, string playerId, Dictionary<GemColor, int> gems)
         {
@@ -169,8 +214,6 @@ namespace Splendor_Game_Server.Hubs
 
         // =====================================================================
         // DISCARD GEM
-        // - Chỉ gọi sau NeedDiscard
-        // - Broadcast lại state sau khi discard xong
         // =====================================================================
         public async Task<object> DiscardGem(string gameId, string playerId, Dictionary<GemColor, int> gems)
         {
@@ -198,10 +241,6 @@ namespace Splendor_Game_Server.Hubs
 
         // =====================================================================
         // PURCHASE CARD
-        // - 1 noble → auto assign, chuyển turn
-        // - Nhiều noble → gửi NeedSelectNoble riêng caller
-        // - 0 noble → chuyển turn
-        // - Check last round & game over
         // =====================================================================
         public async Task<object> PurchaseCard(string gameId, string playerId, Guid cardId)
         {
@@ -215,17 +254,15 @@ namespace Splendor_Game_Server.Hubs
                     return new { success = false };
                 }
 
-                await BroadcastGameState(gameId);
-
                 if (result.IsGameOver)
                 {
-                    await Clients.Group($"game:{gameId}").SendAsync("GameOver", new
-                    {
-                        winner = result.Winner
-                    });
+                    // Redis đã xóa → broadcast từ MongoDB
+                    await BroadcastGameOverState(gameId, result.Winner);
                 }
                 else
                 {
+                    await BroadcastGameState(gameId);
+
                     if (result.JustTriggeredLastRound)
                     {
                         await Clients.Group($"game:{gameId}").SendAsync("LastRound", new
@@ -255,8 +292,6 @@ namespace Splendor_Game_Server.Hubs
 
         // =====================================================================
         // SELECT NOBLE
-        // - Chỉ gọi sau NeedSelectNoble
-        // - Assign noble → chuyển turn → check end game
         // =====================================================================
         public async Task<object> SelectNoble(string gameId, string playerId, Guid nobleId)
         {
@@ -270,21 +305,22 @@ namespace Splendor_Game_Server.Hubs
                     return new { success = false };
                 }
 
-                await BroadcastGameState(gameId);
-
                 if (result.IsGameOver)
                 {
-                    await Clients.Group($"game:{gameId}").SendAsync("GameOver", new
-                    {
-                        winner = result.Winner
-                    });
+                    // Redis đã xóa → broadcast từ MongoDB
+                    await BroadcastGameOverState(gameId, result.Winner);
                 }
-                else if (result.JustTriggeredLastRound)
+                else
                 {
-                    await Clients.Group($"game:{gameId}").SendAsync("LastRound", new
+                    await BroadcastGameState(gameId);
+
+                    if (result.JustTriggeredLastRound)
                     {
-                        triggeredBy = playerId
-                    });
+                        await Clients.Group($"game:{gameId}").SendAsync("LastRound", new
+                        {
+                            triggeredBy = playerId
+                        });
+                    }
                 }
 
                 return new { success = true };
@@ -299,7 +335,6 @@ namespace Splendor_Game_Server.Hubs
 
         // =====================================================================
         // RESERVE CARD
-        // - Giữ card, nhận gold nếu có, chuyển turn ngay
         // =====================================================================
         public async Task<object> ReserveCard(string gameId, string playerId, Guid? cardId, int? level = null)
         {
@@ -326,7 +361,7 @@ namespace Splendor_Game_Server.Hubs
         }
 
         // =====================================================================
-        // BROADCAST GAME STATE (internal)
+        // BROADCAST GAME STATE — từ Redis (game đang chạy)
         // =====================================================================
         private async Task BroadcastGameState(string roomCode)
         {
@@ -351,12 +386,69 @@ namespace Splendor_Game_Server.Hubs
                 };
 
                 await Clients.Group($"game:{roomCode}").SendAsync("GameStateUpdated", response);
-
                 _logger.LogDebug("📡 Game state broadcasted for {RoomCode}", roomCode);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "❌ Error broadcasting game state for {RoomCode}", roomCode);
+                throw;
+            }
+        }
+
+        // =====================================================================
+        // BROADCAST GAME OVER STATE — từ MongoDB (Redis đã xóa)
+        // Gửi GameStateUpdated (state=Completed) + GameOver event
+        // =====================================================================
+        private async Task BroadcastGameOverState(string roomCode, string? winnerId)
+        {
+            try
+            {
+                var history = await _historyService.GetByGameIdAsync(roomCode);
+                if (history == null)
+                {
+                    _logger.LogWarning("⚠️ Game history not found for {RoomCode} after game over", roomCode);
+                    return;
+                }
+
+                // Gửi GameStateUpdated với state=Completed để FE hiện GameOverOverlay
+                var completedResponse = new
+                {
+                    info = new
+                    {
+                        gameId = history.GameId,
+                        state = history.State,
+                        winnerId = history.WinnerId,
+                        players = history.PlayerOrder,
+                        completedAt = history.CompletedAt
+                    },
+                    players = history.Players.ToDictionary(
+                        kv => kv.Key,
+                        kv => (object)new
+                        {
+                            playerId = kv.Value.PlayerId,
+                            name = kv.Value.Name,
+                            points = kv.Value.Score,
+                            rank = kv.Value.Rank,
+                            isWinner = kv.Value.IsWinner,
+                            totalOwnedCards = kv.Value.Stats.Contains("purchasedCards")
+                                ? kv.Value.Stats["purchasedCards"].AsInt32
+                                : 0,
+                            bonuses = new { }
+                        }
+                    ),
+                    board = (object?)null,
+                    turn = (object?)null,
+                    cardDecks = (object?)null,
+                };
+
+                await Clients.Group($"game:{roomCode}").SendAsync("GameStateUpdated", completedResponse);
+                await Clients.Group($"game:{roomCode}").SendAsync("GameOver", new { winner = winnerId });
+
+                _logger.LogInformation("🏆 Game over broadcasted for {RoomCode}, winner: {WinnerId}", roomCode, winnerId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error broadcasting game over state for {RoomCode}", roomCode);
                 throw;
             }
         }

@@ -13,6 +13,7 @@ namespace CleanArchitecture.Application.Service
     public class SplendorService : ISplendorService
     {
         private readonly ISplendorRepository _configRepo;
+        private readonly IGameHistoryRepository _historyService;
         private readonly IGameStateStore _stateStore;
         private readonly IRedisMapper _redisMapper;
         private readonly GameInitializationSystem _initSystem;
@@ -26,6 +27,7 @@ namespace CleanArchitecture.Application.Service
 
         public SplendorService(
             ISplendorRepository configRepo,
+            IGameHistoryRepository historyService,
             IGameStateStore stateStore,
             IRedisMapper redisMapper,
             GameInitializationSystem initSystem,
@@ -48,6 +50,7 @@ namespace CleanArchitecture.Application.Service
             _nobleSystem = nobleSystem;
             _turnSystem = turnSystem;
             _endGameSystem = endGameSystem;
+            _historyService = historyService;
         }
 
         // =====================================================================
@@ -247,20 +250,38 @@ namespace CleanArchitecture.Application.Service
                 }
             }
 
-            bool isGameOver = context.GameSession.Status == GameStatus.Completed;
+            if (context.GameSession.Status == GameStatus.Completed)
+            {
+                var history = SplendorHistoryMapper.Map(context, roomCode);
+                await _historyService.SaveAsync(history);
+                await _stateStore.DeleteGameContext(roomCode);
+                await _redisMapper.DeleteGame(roomCode);
+
+                return new PurchaseCardResult
+                {
+                    Success = true,
+                    NeedsSelectNoble = false,
+                    EligibleNobles = new(),
+                    IsGameOver = true,
+                    JustTriggeredLastRound = false,
+                    Winner = context.GameSession.WinnerId
+                };
+            }
+
             bool justTriggeredLastRound = !wasLastRound && (turnComp?.IsLastRound ?? false);
 
             await _stateStore.SaveGameContext(roomCode, context);
             await _redisMapper.SyncGameStateToRedis(context, roomCode);
+
 
             return new PurchaseCardResult
             {
                 Success = true,
                 NeedsSelectNoble = eligibleNobles.Count > 1,
                 EligibleNobles = eligibleNobles.Count > 1 ? eligibleNobles : new(),
-                IsGameOver = isGameOver,
+                IsGameOver = false,
                 JustTriggeredLastRound = justTriggeredLastRound,
-                Winner = isGameOver ? context.GameSession.WinnerId : null
+                Winner = null
             };
         }
 
@@ -292,7 +313,22 @@ namespace CleanArchitecture.Application.Service
             _turnSystem.Execute(context);     // tăng index
             _endGameSystem.Execute(context);  // check game over với index mới
 
-            bool isGameOver = context.GameSession.Status == GameStatus.Completed;
+            if (context.GameSession.Status == GameStatus.Completed)
+            {
+                var history = SplendorHistoryMapper.Map(context, roomCode);
+                await _historyService.SaveAsync(history);
+                await _stateStore.DeleteGameContext(roomCode);
+                await _redisMapper.DeleteGame(roomCode);
+
+                return new SelectNobleResult
+                {
+                    Success = true,
+                    IsGameOver = true,
+                    JustTriggeredLastRound = false,
+                    Winner = context.GameSession.WinnerId
+                };
+            }
+
             bool justTriggeredLastRound = !wasLastRound && turnComp.IsLastRound;
 
             // KHÔNG gọi _turnSystem lần 2
@@ -303,9 +339,9 @@ namespace CleanArchitecture.Application.Service
             return new SelectNobleResult
             {
                 Success = true,
-                IsGameOver = isGameOver,
+                IsGameOver = false,
                 JustTriggeredLastRound = justTriggeredLastRound,
-                Winner = isGameOver ? context.GameSession.WinnerId : null
+                Winner = null
             };
         }
 

@@ -37,7 +37,11 @@ namespace CleanArchitecture.Domain.Model.Splendor.System
                 var boardEntity = context.GetEntity<BoardEntity>(context.GameSession.BoardEntityId);
                 var boardComp = boardEntity?.GetComponent<BoardComponent>();
                 if (boardComp != null && !boardComp.VisibleNobles.Contains(nobleId))
+<<<<<<< HEAD
                     continue; 
+=======
+                    continue; // noble này đã được assign cho người khác rồi
+>>>>>>> 66fc2b52082313059bd7b56ebfbb48d674b4732c
 
                 bool meetsRequirements = nobleComponent.Requirements.All(req =>
                     playerComponent.Bonuses.GetValueOrDefault(req.Key, 0) >= req.Value);

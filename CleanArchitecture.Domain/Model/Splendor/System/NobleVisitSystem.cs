@@ -26,27 +26,24 @@ namespace CleanArchitecture.Domain.Model.Splendor.System
 
             var eligibleNobles = new List<Guid>();
 
+            // Chỉ check nobles còn trên board (NobleIds đã loại những noble đã về rồi)
             foreach (var nobleId in context.GameSession.NobleIds)
             {
                 var nobleEntity = context.GetEntity<NobleEntity>(nobleId);
                 var nobleComponent = nobleEntity?.GetComponent<NobleComponent>();
-
                 if (nobleComponent == null) continue;
 
-                bool meetsRequirements = true;
-                foreach (var requirement in nobleComponent.Requirements)
-                {
-                    if (playerComponent.Bonuses[requirement.Key] < requirement.Value)
-                    {
-                        meetsRequirements = false;
-                        break;
-                    }
-                }
+                // Thêm check: noble phải còn trên VisibleNobles của board
+                var boardEntity = context.GetEntity<BoardEntity>(context.GameSession.BoardEntityId);
+                var boardComp = boardEntity?.GetComponent<BoardComponent>();
+                if (boardComp != null && !boardComp.VisibleNobles.Contains(nobleId))
+                    continue; // noble này đã được assign cho người khác rồi
+
+                bool meetsRequirements = nobleComponent.Requirements.All(req =>
+                    playerComponent.Bonuses.GetValueOrDefault(req.Key, 0) >= req.Value);
 
                 if (meetsRequirements)
-                {
                     eligibleNobles.Add(nobleId);
-                }
             }
 
             return eligibleNobles;

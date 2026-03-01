@@ -96,15 +96,27 @@ namespace Splendor_Game_Server.Hubs
                                 rank = kv.Value.Rank,
                                 isWinner = kv.Value.IsWinner,
                                 totalOwnedCards = kv.Value.Stats.Contains("purchasedCards")
-                                    ? kv.Value.Stats["purchasedCards"].AsInt32
-                                    : 0,
-                                bonuses = new { }
+                                ? kv.Value.Stats["purchasedCards"].AsInt32
+                                : 0,
+                                // Đọc gems dict từ Stats
+                                gems = kv.Value.Stats.Contains("gems") && kv.Value.Stats["gems"].IsBsonDocument
+                                ? kv.Value.Stats["gems"].AsBsonDocument
+                                    .ToDictionary(e => e.Name, e => e.Value.ToInt32())
+                                : new Dictionary<string, int>(),
+                                // Đọc bonuses dict từ Stats
+                                bonuses = kv.Value.Stats.Contains("bonuses") && kv.Value.Stats["bonuses"].IsBsonDocument
+                                ? kv.Value.Stats["bonuses"].AsBsonDocument
+                                    .ToDictionary(e => e.Name, e => e.Value.ToInt32())
+                                : new Dictionary<string, int>(),
+                                reservedCards = new List<object>(),
+                                purchasedCards = new List<object>(),
                             }
                         ),
                         board = (object?)null,
                         turn = (object?)null,
                         cardDecks = (object?)null,
                     };
+
 
                     await Clients.Caller.SendAsync("GameStateLoaded", completedResponse);
                     _logger.LogInformation("✅ Player {PlayerId} rejoined completed game {GameId} from MongoDB", playerId, gameId);

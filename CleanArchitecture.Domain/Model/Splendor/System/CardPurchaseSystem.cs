@@ -85,6 +85,7 @@ namespace CleanArchitecture.Domain.Model.Splendor.System
                     needed -= useGold;
                 }
 
+
                 // subtract used gems from player and add back to board
                 playerComponent.Gems[cost.Key] = playerComponent.Gems.GetValueOrDefault(cost.Key, 0) - fromGems;
                 boardComponent.AvailableGems[cost.Key] = boardComponent.AvailableGems.GetValueOrDefault(cost.Key, 0) + fromGems;

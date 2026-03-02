@@ -161,19 +161,19 @@ namespace Splendor_Game_Server.Controllers
                    .Replace("{{code}}", verificationCode);
                 string subject = "Verification Code";
                 SmtpMail oMail = new SmtpMail("TryIt");
-                oMail.From = "system.milk.delivery@gmail.com";
+                oMail.From = "kenshiro29092000@gmail.com";
                 oMail.To = player.Username;
                 oMail.Subject = subject;
                 oMail.HtmlBody = body;
                 SmtpServer oServer = new SmtpServer("smtp.gmail.com");
-                oServer.User = "system.milk.delivery@gmail.com";
-                oServer.Password = "ukbhmjdaaacdyyxh";
+                oServer.User = "kenshiro29092000@gmail.com";
+                oServer.Password = "dtwmrnsyyhudigka";
 
                 // Set 465 port
-                oServer.Port = 465;
+                oServer.Port = 587;
 
                 // detect SSL/TLS automatically
-                oServer.ConnectType = SmtpConnectType.ConnectSSLAuto; ;
+                oServer.ConnectType = SmtpConnectType.ConnectSTARTTLS;
                 EASendMail.SmtpClient oSmtp = new EASendMail.SmtpClient();
                 oSmtp.SendMail(oServer, oMail);
 
@@ -218,19 +218,19 @@ namespace Splendor_Game_Server.Controllers
                    .Replace("{{code}}", verificationCode);
                 string subject = "Reset Password";
                 SmtpMail oMail = new SmtpMail("TryIt");
-                oMail.From = "system.milk.delivery@gmail.com";
+                oMail.From = "kenshiro29092000@gmail.com";
                 oMail.To = player.Username;
                 oMail.Subject = subject;
                 oMail.HtmlBody = body;
                 SmtpServer oServer = new SmtpServer("smtp.gmail.com");
-                oServer.User = "system.milk.delivery@gmail.com";
-                oServer.Password = "ukbhmjdaaacdyyxh";
+                oServer.User = "kenshiro29092000@gmail.com";
+                oServer.Password = "dtwmrnsyyhudigka";
 
                 // Set 465 port
-                oServer.Port = 465;
+                oServer.Port = 587;
 
                 // detect SSL/TLS automatically
-                oServer.ConnectType = SmtpConnectType.ConnectSSLAuto; ;
+                oServer.ConnectType = SmtpConnectType.ConnectSTARTTLS; ;
                 EASendMail.SmtpClient oSmtp = new EASendMail.SmtpClient();
                 oSmtp.SendMail(oServer, oMail);
                 return Ok(new { StatusCode = 200, Message = "send code succedfully", });
@@ -286,19 +286,19 @@ namespace Splendor_Game_Server.Controllers
                 body = body.Replace("{{email}}", player.Username)
                    .Replace("{{code}}", verificationCode);
                 SmtpMail oMail = new SmtpMail("TryIt");
-                oMail.From = "system.milk.delivery@gmail.com";
+                oMail.From = "kenshiro29092000@gmail.com";
                 oMail.To = player.Username;
                 oMail.Subject = subject;
                 oMail.HtmlBody = body;
                 SmtpServer oServer = new SmtpServer("smtp.gmail.com");
-                oServer.User = "system.milk.delivery@gmail.com";
-                oServer.Password = "ukbhmjdaaacdyyxh";
+                oServer.User = "kenshiro29092000@gmail.com";
+                oServer.Password = "dtwmrnsyyhudigka";
 
                 // Set 465 port
-                oServer.Port = 465;
+                oServer.Port = 587;
 
                 // detect SSL/TLS automatically
-                oServer.ConnectType = SmtpConnectType.ConnectSSLAuto; ;
+                oServer.ConnectType = SmtpConnectType.ConnectSTARTTLS; ;
                 EASendMail.SmtpClient oSmtp = new EASendMail.SmtpClient();
                 oSmtp.SendMail(oServer, oMail);
 

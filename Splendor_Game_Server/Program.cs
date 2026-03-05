@@ -392,6 +392,8 @@ builder.Services.AddSwaggerGen(c =>
 
 builder.Services.AddEndpointsApiExplorer();
 
+builder.WebHost.UseUrls("http://0.0.0.0:8080");
+
 var app = builder.Build();
 
 // Configure pipeline
@@ -407,7 +409,7 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
 
 if (app.Environment.IsDevelopment())
 {
-    app.UseDeveloperExceptionPage();
+    app.UseDeveloperExceptionPage(); 
 }
 
 app.UseRouting();

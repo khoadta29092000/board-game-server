@@ -47,7 +47,7 @@ namespace CleanArchitecture.Domain.Model.Splendor.System
             }
 
             return eligibleNobles;
-        }
+        } 
 
         public void AssignNoble(GameContext context, string playerId, Guid nobleId)
         {

@@ -246,6 +246,8 @@ builder.Services.AddSingleton<IRoomService, RoomService>();
 builder.Services.AddSingleton<IRoomRepository, RoomRepository>();
 builder.Services.AddSingleton<IGameHistoryRepository, GameHistoryRepository>();
 builder.Services.AddSingleton<IGameHistoryService, GameHistoryService>();
+builder.Services.AddSingleton<ITutorialSplendorService, TutorialSplendorService>();
+builder.Services.AddSingleton<IBotService, BotService>();
 
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<IUserConnectionService, UserConnectionService>();

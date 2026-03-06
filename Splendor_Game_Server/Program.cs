@@ -9,6 +9,7 @@ using CleanArchitecture.Infrastructure.Redis;
 using CleanArchitecture.Infrastructure.Repository;
 using CleanArchitecture.Infrastructure.Security;
 using CleanArchitecture.Presentation.Hubs;
+using CleanArchitecture.SignalR.Hubs;
 using GraphQL;
 using MessagePack;
 using MessagePack.Resolvers;
@@ -430,6 +431,7 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHub<RoomHub>("/roomHub");
 app.MapHub<GameHub>("/gameHub");
+app.MapHub<TutorialGameHub>("/tutorialGameHub");
 app.MapGraphQL("/graphql");
 
 app.Run();

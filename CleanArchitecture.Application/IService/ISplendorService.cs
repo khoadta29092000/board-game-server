@@ -17,6 +17,7 @@ namespace CleanArchitecture.Application.IService
         Task<SelectNobleResult> SelectNobleAsync(string roomCode, string playerId, Guid nobleId);
         Task<ReserveCardResult> ReserveCardAsync(string roomCode, string playerId, Guid? cardId, int? level = null);
         Task<bool> DiscardGemsAsync(string roomCode, string playerId, Dictionary<GemColor, int> gems);
+        Task<bool> PassTurnAsync(string roomCode, string playerId);
         Task EndTurnAsync(string roomCode, string playerId);
     }
 }

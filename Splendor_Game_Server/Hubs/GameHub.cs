@@ -383,6 +383,26 @@ namespace Splendor_Game_Server.Hubs
                 return new { success = false, message = ex.Message };
             }
         }
+        // =====================================================================
+        // PASS TURN — player gọi khi không có action hợp lệ nào
+        // =====================================================================
+        public async Task<object> PassTurn(string gameId, string playerId)
+        {
+            try
+            {
+                var success = await _gameService.PassTurnAsync(gameId,playerId);
+                if (!success)
+                    return new { success = false, message = "can't pass turn." };
+
+                await BroadcastGameState(playerId);
+                return new { success = true };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Hub] PassTurn failed — playerId={P}", playerId);
+                return new { success = false, message = "pass turn fail." };
+            }
+        }
 
         // =====================================================================
         // BROADCAST GAME STATE — từ Redis (game đang chạy)

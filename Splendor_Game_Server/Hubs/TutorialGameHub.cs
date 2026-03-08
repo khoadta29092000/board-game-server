@@ -301,14 +301,6 @@ namespace CleanArchitecture.SignalR.Hubs
                     });
 
                     return new { success = true };
-
-
-
-
-
-
-
-
                 }
 
                 await TriggerBotTurn(playerId);

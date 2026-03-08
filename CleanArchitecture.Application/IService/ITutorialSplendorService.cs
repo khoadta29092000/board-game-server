@@ -24,6 +24,7 @@ namespace CleanArchitecture.Application.IService
         Task<ReserveCardResult> ReserveCardAsync(string playerId, Guid? cardId, int? level = null);
 
         Task<GameContext?> GetTutorialStateAsync(string playerId);
+        Task<bool> PassTurnAsync(string playerId);
 
         Task EndTutorialAsync(string playerId);
     }

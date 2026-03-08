@@ -372,6 +372,36 @@ namespace CleanArchitecture.Application.Service
                 throw;
             }
         }
+        public async Task<bool> PassTurnAsync(string playerId)
+        {
+            try
+            {
+                var roomCode = GetRoomCode(playerId);
+                var context = await _stateStore.LoadGameContext(roomCode);
+                if (context == null) return false;
+
+                var validationSystem = new ValidationSystem();
+                if (!validationSystem.IsPlayerTurn(context, playerId)) return false;
+
+                // Force phase = Completed → TurnSystem sẽ advance sang lượt tiếp
+                var boardEntity = context.GetEntity<BoardEntity>(context.GameSession.BoardEntityId);
+                var turnComp = boardEntity?.GetComponent<TurnComponent>();
+                if (turnComp == null) return false;
+
+                turnComp.Phase = TurnPhase.Completed;
+                var turnSystem = new TurnSystem();
+                turnSystem.Execute(context);
+
+                await _stateStore.SaveGameContext(roomCode, context);
+                await _redisMapper.SyncGameStateToRedis(context, roomCode);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[TutorialService] PassTurnAsync failed — playerId={P}", playerId);
+                return false;
+            }
+        }
 
         // Tutorial không lưu Mongo, chỉ xóa Redis
         public async Task EndTutorialAsync(string playerId)

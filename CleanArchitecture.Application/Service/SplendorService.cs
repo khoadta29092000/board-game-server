@@ -395,6 +395,38 @@ namespace CleanArchitecture.Application.Service
         }
 
         // =====================================================================
+        // PASS TURN (manual fallback)
+        // =====================================================================
+        public async Task<bool> PassTurnAsync(string roomCode, string playerId)
+        {
+            try
+            {
+                var context = await _stateStore.LoadGameContext(roomCode);
+                if (context == null) return false;
+
+                var validationSystem = new ValidationSystem();
+                if (!validationSystem.IsPlayerTurn(context, playerId)) return false;
+
+                // Force phase = Completed → TurnSystem sẽ advance sang lượt tiếp
+                var boardEntity = context.GetEntity<BoardEntity>(context.GameSession.BoardEntityId);
+                var turnComp = boardEntity?.GetComponent<TurnComponent>();
+                if (turnComp == null) return false;
+
+                turnComp.Phase = TurnPhase.Completed;
+                var turnSystem = new TurnSystem();
+                turnSystem.Execute(context);
+
+                await _stateStore.SaveGameContext(roomCode, context);
+                await _redisMapper.SyncGameStateToRedis(context, roomCode);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                return false;
+            }
+        }
+
+        // =====================================================================
         // END TURN (manual fallback)
         // =====================================================================
         public async Task EndTurnAsync(string roomCode, string playerId)

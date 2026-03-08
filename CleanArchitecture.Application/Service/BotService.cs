@@ -12,7 +12,8 @@ namespace CleanArchitecture.Application.Service
     {
         CollectGems,
         PurchaseCard,
-        ReserveCard
+        ReserveCard,
+        PassTurn   // fallback khi không có action nào hợp lệ
     }
 
     public class BotAction
@@ -126,6 +127,12 @@ namespace CleanArchitecture.Application.Service
                             await _splendorService.DiscardGemsAsync(roomCode, BOT_PLAYER_ID, toDiscard);
                         }
                         break;
+
+                    case BotActionType.PassTurn:
+                        // Không có action hợp lệ — force advance turn qua EndTurnAsync
+                        _logger.LogWarning("[Bot] PassTurn — no valid action, roomCode={RoomCode}", roomCode);
+                        await _splendorService.EndTurnAsync(roomCode, BOT_PLAYER_ID);
+                        break;
                 }
             }
             catch (Exception ex)
@@ -224,15 +231,50 @@ namespace CleanArchitecture.Application.Service
                 }
             }
 
-            // 4. Lấy gem còn thiếu cho target
+            // 4. Mua bất kỳ card nào đủ tiền (kể cả card không phải target)
+            var anyAffordable = GetAllVisibleCards(context, boardComp)
+                .FirstOrDefault(c => CanAfford(c.Comp, botComp));
+            if (anyAffordable != null)
+            {
+                return new BotAction { Type = BotActionType.PurchaseCard, CardId = anyAffordable.Id };
+            }
+
+            // 5. Lấy gem còn thiếu cho target
             if (targetCard != null)
             {
                 var gemsAction = PickGemsForTarget(targetCard.Comp, botComp, boardComp);
                 if (gemsAction != null) return gemsAction;
             }
 
-            // 5. Fallback: lấy 3 gem nhiều nhất trên board
-            return FallbackCollectGems(boardComp);
+            // 6. Fallback collect: lấy 3 gem nhiều nhất trên board
+            var fallback = FallbackCollectGems(boardComp);
+            if (fallback != null) return fallback;
+
+            // 7. Bank cạn / không lấy được gem → Reserve card lv2/lv3 xịn nhất chưa reserve
+            if (botComp.ReservedCards.Count < 3)
+            {
+                var reserveTarget = PickReserveTarget(context, botComp, boardComp);
+                if (reserveTarget != null)
+                    return new BotAction { Type = BotActionType.ReserveCard, CardId = reserveTarget.Id };
+            }
+
+            // 8. Deadlock hoàn toàn → PassTurn
+            return new BotAction { Type = BotActionType.PassTurn };
+        }
+
+        // =====================================================================
+        // PICK RESERVE TARGET: Card lv2/lv3 có điểm cao, chưa bị reserve
+        // =====================================================================
+        private CardInfo? PickReserveTarget(GameContext context, PlayerComponent botComp, BoardComponent boardComp)
+        {
+            var alreadyReserved = botComp.ReservedCards.ToHashSet();
+
+            return GetAllVisibleCards(context, boardComp)
+                .Where(c => !alreadyReserved.Contains(c.Id)
+                         && (c.Comp.Level >= 2 || c.Comp.PrestigePoints > 0))
+                .OrderByDescending(c => c.Comp.PrestigePoints)
+                .ThenBy(c => GetGemShortfall(c.Comp, botComp).Values.Sum())
+                .FirstOrDefault();
         }
 
         // =====================================================================
@@ -304,9 +346,9 @@ namespace CleanArchitecture.Application.Service
         }
 
         // =====================================================================
-        // FALLBACK: Lấy 3 gem màu nhiều nhất trên board
+        // FALLBACK: Lấy 3 gem màu nhiều nhất trên board — null nếu bank cạn
         // =====================================================================
-        private BotAction FallbackCollectGems(BoardComponent boardComp)
+        private BotAction? FallbackCollectGems(BoardComponent boardComp)
         {
             var gems = boardComp.AvailableGems
                 .Where(kv => kv.Key != GemColor.Gold && kv.Value > 0)
@@ -314,6 +356,7 @@ namespace CleanArchitecture.Application.Service
                 .Take(3)
                 .ToDictionary(kv => kv.Key, _ => 1);
 
+            if (gems.Count == 0) return null;
             return new BotAction { Type = BotActionType.CollectGems, Gems = gems };
         }
 

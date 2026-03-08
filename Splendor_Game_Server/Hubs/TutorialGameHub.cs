@@ -124,25 +124,34 @@ namespace CleanArchitecture.SignalR.Hubs
         // =====================================================================
         // DISCARD GEMS
         // =====================================================================
-        public async Task DiscardGems(string playerId, Dictionary<GemColor, int> gems)
+        public async Task<object> DiscardGems(string playerId, Dictionary<GemColor, int> gems)
         {
             try
             {
                 var success = await _tutorialService.DiscardGemsAsync(playerId, gems);
-                if (!success) { await Clients.Caller.SendAsync("Error", new { message = "Bỏ gem không hợp lệ.", code = "DISCARD_GEM_ERROR" }); return; }
+
+                if (!success)
+                {
+                    await Clients.Caller.SendAsync("Error", new { message = "Bỏ gem không hợp lệ.", code = "DISCARD_GEM_ERROR" });
+                    return new { success = false, message = "Bỏ gem không hợp lệ." };
+                }
+
                 await BroadcastState(playerId);
                 await TriggerBotTurn(playerId);
+
+                return new { success = true };
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "[Hub] DiscardGems failed — playerId={P}", playerId);
+                return new { success = false, message = "Lỗi server khi bỏ gem." };
             }
         }
 
         // =====================================================================
         // PURCHASE CARD
         // =====================================================================
-        public async Task PurchaseCard(string playerId, Guid cardId)
+        public async Task<object> PurchaseCard(string playerId, Guid cardId)
         {
             try
             {
@@ -151,7 +160,7 @@ namespace CleanArchitecture.SignalR.Hubs
                 if (!result.Success)
                 {
                     await Clients.Caller.SendAsync("Error", new { message = "Không đủ gem để mua card này.", code = "PURCHASE_CARD_ERROR" });
-                    return;
+                    return new { success = false, message = "Không đủ gem để mua card này." };
                 }
 
                 if (result.IsGameOver)
@@ -165,29 +174,30 @@ namespace CleanArchitecture.SignalR.Hubs
                     });
                     await _tutorialService.EndTutorialAsync(playerId);
                     await _sessionRepo.DeleteStepAsync(playerId);
-                    return;
+                    return new { success = true};
                 }
 
                 await BroadcastState(playerId);
-
                 if (result.NeedsSelectNoble)
                 {
                     await Clients.Caller.SendAsync("NeedSelectNoble", new { eligibleNobles = result.EligibleNobles });
-                    return;
+                    return new { success = true };
                 }
 
                 await TriggerBotTurn(playerId);
+                return new { success = true };
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "[Hub] PurchaseCard failed — playerId={P}", playerId);
+                return new { success = false, message = "Lỗi server khi mua card." };
             }
         }
 
         // =====================================================================
         // SELECT NOBLE
         // =====================================================================
-        public async Task SelectNoble(string playerId, Guid nobleId)
+        public async Task<object> SelectNoble(string playerId, Guid nobleId)
         {
             try
             {
@@ -196,36 +206,43 @@ namespace CleanArchitecture.SignalR.Hubs
                 if (!result.Success)
                 {
                     await Clients.Caller.SendAsync("Error", new { message = "Noble không hợp lệ.", code = "SELECT_NOBLE_ERROR" });
-                    return;
+                    return new { success = false, message = "Noble không hợp lệ." };
                 }
 
                 if (result.IsGameOver)
                 {
                     await BroadcastGameOverState(playerId);
+
                     await Clients.Caller.SendAsync("GameOver", new { winner = result.Winner });
+
                     await Clients.Caller.SendAsync("TutorialCompleted", new
                     {
                         winner = result.Winner,
                         message = "🎉 Chúc mừng! Bạn đã thắng ván tutorial đầu tiên!"
                     });
+
                     await _tutorialService.EndTutorialAsync(playerId);
                     await _sessionRepo.DeleteStepAsync(playerId);
-                    return;
+
+                    return new { success = true };
                 }
 
                 await BroadcastState(playerId);
                 await TriggerBotTurn(playerId);
+
+                return new { success = true };
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "[Hub] SelectNoble failed — playerId={P}", playerId);
+                return new { success = false, message = "Lỗi server khi chọn noble." };
             }
         }
 
         // =====================================================================
         // RESERVE CARD
         // =====================================================================
-        public async Task ReserveCard(string playerId, Guid? cardId, int? level = null)
+        public async Task<object> ReserveCard(string playerId, Guid? cardId, int? level = null)
         {
             try
             {
@@ -234,7 +251,7 @@ namespace CleanArchitecture.SignalR.Hubs
                 if (!result.Success)
                 {
                     await Clients.Caller.SendAsync("Error", new { message = "Không thể reserve card này.", code = "RESERVE_CARD_ERROR" });
-                    return;
+                    return new { success = false, message = "Không thể reserve card này." };
                 }
 
                 await BroadcastState(playerId);
@@ -246,14 +263,26 @@ namespace CleanArchitecture.SignalR.Hubs
                         currentGems = result.CurrentGems,
                         excessCount = result.TotalGems - 10
                     });
-                    return;
+
+                    return new { success = true };
+
+
+
+
+
+
+
+
                 }
 
                 await TriggerBotTurn(playerId);
+
+                return new { success = true };
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "[Hub] ReserveCard failed — playerId={P}", playerId);
+                return new { success = false, message = "Lỗi server khi reserve card." };
             }
         }
 
@@ -268,7 +297,7 @@ namespace CleanArchitecture.SignalR.Hubs
 
                 await Clients.Caller.SendAsync("BotThinking", new { message = "Bot đang suy nghĩ..." });
 
-                await _botService.TakeTurnAsync(roomCode, delayMs: 00);
+                await _botService.TakeTurnAsync(roomCode, delayMs: 3000);
 
                 var context = await _tutorialService.GetTutorialStateAsync(playerId);
                 if (context == null)

@@ -163,7 +163,7 @@ namespace CleanArchitecture.Application.Service
 
         // =====================================================================
         // PICK VISIBLE CARDS: Match theo design tutorial
-        // Level 1: c17, c9, c25, c8
+        // Level 1: "c8", "c4", "c11", "c3",
         // Level 2: c53, c59, c67, c62
         // Level 3: c79, c83, c80, c84
         // =====================================================================
@@ -209,6 +209,7 @@ namespace CleanArchitecture.Application.Service
 
         // =====================================================================
         // DESIGN CARDS: Đặc điểm từng card cố định theo MongoDB data
+        //"c8", "c4", "c11", "c3",
         // =====================================================================
         private List<CardDesign> GetDesignCards(int level)
         {
@@ -216,13 +217,13 @@ namespace CleanArchitecture.Application.Service
             {
                 1 => new List<CardDesign>
                 {
-                    // c17: green bonus, 0pt, cost: red×3
-                    new(GemColor.Green, 0, new() { { GemColor.Red, 3 } }),
-                    // c9: blue bonus, 0pt, cost: white×3
-                    new(GemColor.Blue, 0, new() { { GemColor.White, 3 } }),
-                    // c25: red bonus, 0pt, cost: green×3
-                    new(GemColor.Red, 0, new() { { GemColor.Green, 3 } }),
-                    // c8: white bonus, 1pt, cost: red×4
+                    // c4: blue bonus, 0pt, cost: white×3
+                    new(GemColor.White, 0, new() { { GemColor.Blue, 1 }, { GemColor.Green, 2 },{ GemColor.Red, 1 },{ GemColor.Black, 1 }}),
+                    // c11: red bonus, 0pt, cost: green×3
+                    new(GemColor.Blue, 0, new() { { GemColor.White, 1 }, { GemColor.Green, 1 },{ GemColor.Red, 1 },{ GemColor.Black, 2 }  }),
+                    // c3: white bonus, 0pt, cost: red×4
+                    new(GemColor.White, 0, new() {{ GemColor.Blue, 1 }, { GemColor.Green, 1 },{ GemColor.Red, 1 },{ GemColor.Black, 2 } }),
+                     // c8: green bonus, 1pt, cost: red×3
                     new(GemColor.White, 1, new() { { GemColor.Red, 4 } }),
                 },
                 2 => new List<CardDesign>

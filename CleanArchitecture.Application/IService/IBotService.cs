@@ -8,6 +8,6 @@ namespace CleanArchitecture.Application.IService
 {
     public interface IBotService
     {
-        Task TakeTurnAsync(string roomCode, int delayMs = 1500);
+        Task TakeTurnAsync(string roomCode, int delayMs = 10000);
     }
 }

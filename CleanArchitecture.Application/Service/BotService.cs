@@ -49,7 +49,7 @@ namespace CleanArchitecture.Application.Service
         // =====================================================================
         // ENTRY POINT: Bot thực hiện 1 lượt hoàn chỉnh
         // =====================================================================
-        public async Task TakeTurnAsync(string roomCode, int delayMs = 1500)
+        public async Task TakeTurnAsync(string roomCode, int delayMs = 10000)
         {
             try
             {

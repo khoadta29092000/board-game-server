@@ -76,10 +76,16 @@ namespace CleanArchitecture.Application.Service
                     // Quá grace period → xóa toàn bộ session
                     var roomCode = TutorialSplendorService.GetRoomCode(playerId);
 
-                    await _stateStore.DeleteGameContext(roomCode);
-                    await _redisMapper.DeleteGame(roomCode);
-                    await _sessionRepo.RemoveDisconnectDataAsync(playerId);
-                    await _sessionRepo.DeleteStepAsync(playerId);
+                    // Xóa song song tất cả — DeleteGameContext đã cover game:* keys
+                    // DeleteGame gọi thêm để chắc chắn (idempotent)
+                    // DeleteStepAsync PHẢI chạy cùng lúc — nếu step còn mà game mất
+                    //   → reconnect sẽ thấy step cũ với board mới (bug)
+                    await Task.WhenAll(
+                        _stateStore.DeleteGameContext(roomCode),
+                        _redisMapper.DeleteGame(roomCode),
+                        _sessionRepo.RemoveDisconnectDataAsync(playerId),
+                        _sessionRepo.DeleteStepAsync(playerId)
+                    );
 
                     _logger.LogInformation(
                         "Tutorial expired for {PlayerId} after {Minutes:F1} min",

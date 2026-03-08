@@ -1,5 +1,6 @@
 ﻿using CleanArchitecture.Application.IRepository;
 using CleanArchitecture.Application.IService;
+using Microsoft.Extensions.Logging;
 using CleanArchitecture.Domain.Model.Splendor.Components;
 using CleanArchitecture.Domain.Model.Splendor.Entity;
 using CleanArchitecture.Domain.Model.Splendor.Enum;
@@ -31,13 +32,18 @@ namespace CleanArchitecture.Application.Service
     {
         private readonly ISplendorService _splendorService;
         private readonly IGameStateStore _stateStore;
+        private readonly ILogger<BotService> _logger;
 
         public const string BOT_PLAYER_ID = "BOT_TUTORIAL";
 
-        public BotService(ISplendorService splendorService, IGameStateStore stateStore)
+        public BotService(
+            ISplendorService splendorService,
+            IGameStateStore stateStore,
+            ILogger<BotService> logger)
         {
             _splendorService = splendorService;
             _stateStore = stateStore;
+            _logger = logger;
         }
 
         // =====================================================================
@@ -45,52 +51,86 @@ namespace CleanArchitecture.Application.Service
         // =====================================================================
         public async Task TakeTurnAsync(string roomCode, int delayMs = 1500)
         {
-            await Task.Delay(delayMs);
-
-            var context = await _stateStore.LoadGameContext(roomCode);
-            if (context == null) return;
-
-            // Verify đúng lượt bot
-            var turnSystem = new TurnSystem();
-            var currentPlayerId = turnSystem.GetCurrentPlayerId(context);
-            if (currentPlayerId != BOT_PLAYER_ID) return;
-
-            var action = DecideAction(context);
-            if (action == null) return;
-
-            switch (action.Type)
+            try
             {
-                case BotActionType.CollectGems:
-                    var collectResult = await _splendorService.CollectGemsAsync(roomCode, BOT_PLAYER_ID, action.Gems!);
+                await Task.Delay(delayMs);
 
-                    // Handle discard nếu bot lỡ > 10 gems
-                    if (collectResult.NeedsDiscard)
-                    {
-                        var toDiscard = CalculateDiscardGems(collectResult.CurrentGems);
-                        await _splendorService.DiscardGemsAsync(roomCode, BOT_PLAYER_ID, toDiscard);
-                    }
-                    break;
+                var context = await _stateStore.LoadGameContext(roomCode);
+                if (context == null)
+                {
+                    _logger.LogWarning("[Bot] LoadGameContext null — roomCode={RoomCode}", roomCode);
+                    return;
+                }
 
-                case BotActionType.PurchaseCard:
-                    var purchaseResult = await _splendorService.PurchaseCardAsync(roomCode, BOT_PLAYER_ID, action.CardId!.Value);
+                var turnSystem = new TurnSystem();
+                var currentPlayerId = turnSystem.GetCurrentPlayerId(context);
+                if (currentPlayerId != BOT_PLAYER_ID)
+                {
+                    _logger.LogWarning("[Bot] Not bot turn — current={Current} roomCode={RoomCode}", currentPlayerId, roomCode);
+                    return;
+                }
 
-                    // Handle noble accidentally (bot không target noble nhưng có thể đạt được)
-                    if (purchaseResult.NeedsSelectNoble && purchaseResult.EligibleNobles.Any())
-                    {
-                        await _splendorService.SelectNobleAsync(roomCode, BOT_PLAYER_ID, purchaseResult.EligibleNobles.First());
-                    }
-                    break;
+                var action = DecideAction(context);
+                if (action == null)
+                {
+                    _logger.LogWarning("[Bot] DecideAction null — roomCode={RoomCode}", roomCode);
+                    return;
+                }
 
-                case BotActionType.ReserveCard:
-                    var reserveResult = await _splendorService.ReserveCardAsync(roomCode, BOT_PLAYER_ID, action.CardId);
+                _logger.LogInformation("[Bot] Action={Type} Gems={Gems} Card={Card} roomCode={RoomCode}",
+                    action.Type,
+                    action.Gems != null ? string.Join(",", action.Gems.Select(kv => $"{kv.Key}:{kv.Value}")) : "-",
+                    action.CardId?.ToString() ?? "-",
+                    roomCode);
 
-                    // Handle discard sau khi nhận gold từ reserve
-                    if (reserveResult.NeedsDiscard)
-                    {
-                        var toDiscard = CalculateDiscardGems(reserveResult.CurrentGems);
-                        await _splendorService.DiscardGemsAsync(roomCode, BOT_PLAYER_ID, toDiscard);
-                    }
-                    break;
+                switch (action.Type)
+                {
+                    case BotActionType.CollectGems:
+                        var collectResult = await _splendorService.CollectGemsAsync(roomCode, BOT_PLAYER_ID, action.Gems!);
+                        if (!collectResult.Success)
+                        {
+                            _logger.LogError("[Bot] CollectGems failed — Gems={Gems} roomCode={RoomCode}",
+                                string.Join(",", action.Gems!.Select(kv => $"{kv.Key}:{kv.Value}")), roomCode);
+                            return;
+                        }
+                        if (collectResult.NeedsDiscard)
+                        {
+                            var toDiscard = CalculateDiscardGems(collectResult.CurrentGems);
+                            await _splendorService.DiscardGemsAsync(roomCode, BOT_PLAYER_ID, toDiscard);
+                        }
+                        break;
+
+                    case BotActionType.PurchaseCard:
+                        var purchaseResult = await _splendorService.PurchaseCardAsync(roomCode, BOT_PLAYER_ID, action.CardId!.Value);
+                        if (!purchaseResult.Success)
+                        {
+                            _logger.LogError("[Bot] PurchaseCard failed — CardId={CardId} roomCode={RoomCode}",
+                                action.CardId, roomCode);
+                            return;
+                        }
+                        if (purchaseResult.NeedsSelectNoble && purchaseResult.EligibleNobles.Any())
+                            await _splendorService.SelectNobleAsync(roomCode, BOT_PLAYER_ID, purchaseResult.EligibleNobles.First());
+                        break;
+
+                    case BotActionType.ReserveCard:
+                        var reserveResult = await _splendorService.ReserveCardAsync(roomCode, BOT_PLAYER_ID, action.CardId);
+                        if (!reserveResult.Success)
+                        {
+                            _logger.LogError("[Bot] ReserveCard failed — CardId={CardId} roomCode={RoomCode}",
+                                action.CardId, roomCode);
+                            return;
+                        }
+                        if (reserveResult.NeedsDiscard)
+                        {
+                            var toDiscard = CalculateDiscardGems(reserveResult.CurrentGems);
+                            await _splendorService.DiscardGemsAsync(roomCode, BOT_PLAYER_ID, toDiscard);
+                        }
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Bot] TakeTurnAsync failed — roomCode={RoomCode}", roomCode);
             }
         }
 
@@ -221,28 +261,45 @@ namespace CleanArchitecture.Application.Service
         {
             var shortfall = GetGemShortfall(target, botComp);
 
-            var gemsToTake = shortfall
+            // Màu thiếu mà bank còn hàng
+            var neededColors = shortfall
                 .Where(kv => boardComp.AvailableGems.GetValueOrDefault(kv.Key, 0) > 0)
+                .OrderByDescending(kv => kv.Value)
                 .Select(kv => kv.Key)
-                .Take(3)
                 .ToList();
 
-            if (!gemsToTake.Any()) return null;
+            if (!neededColors.Any()) return null;
 
-            // Nếu chỉ thiếu 1 màu và còn ≥4 → lấy ×2
-            if (gemsToTake.Count == 1 && boardComp.AvailableGems.GetValueOrDefault(gemsToTake[0], 0) >= 4)
+            // Nếu chỉ thiếu đúng 1 màu VÀ bank còn ≥4 → lấy ×2 (hợp lệ)
+            if (neededColors.Count == 1 && boardComp.AvailableGems.GetValueOrDefault(neededColors[0], 0) >= 4)
             {
                 return new BotAction
                 {
                     Type = BotActionType.CollectGems,
-                    Gems = new Dictionary<GemColor, int> { { gemsToTake[0], 2 } }
+                    Gems = new Dictionary<GemColor, int> { { neededColors[0], 2 } }
                 };
             }
+
+            // Cần lấy đúng 3 gem khác màu — bổ sung thêm màu hữu ích nếu neededColors < 3
+            if (neededColors.Count < 3)
+            {
+                var extra = boardComp.AvailableGems
+                    .Where(kv => kv.Key != GemColor.Gold
+                              && kv.Value > 0
+                              && !neededColors.Contains(kv.Key))
+                    .OrderByDescending(kv => kv.Value) // ưu tiên màu nhiều nhất
+                    .Select(kv => kv.Key)
+                    .Take(3 - neededColors.Count);
+                neededColors.AddRange(extra);
+            }
+
+            // Vẫn không đủ 3 (bank cạn kiệt) → fallback
+            if (neededColors.Count < 3) return null;
 
             return new BotAction
             {
                 Type = BotActionType.CollectGems,
-                Gems = gemsToTake.ToDictionary(c => c, _ => 1)
+                Gems = neededColors.Take(3).ToDictionary(c => c, _ => 1)
             };
         }
 

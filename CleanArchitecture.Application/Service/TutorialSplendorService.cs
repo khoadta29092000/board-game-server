@@ -1,4 +1,5 @@
-﻿using CleanArchitecture.Application.IRepository;
+﻿using Microsoft.Extensions.Logging;
+using CleanArchitecture.Application.IRepository;
 using CleanArchitecture.Application.IService;
 using CleanArchitecture.Domain.DTO.Splendor;
 using CleanArchitecture.Domain.Model.Splendor.Components;
@@ -14,6 +15,7 @@ namespace CleanArchitecture.Application.Service
         private readonly IGameStateStore _stateStore;
         private readonly IRedisMapper _redisMapper;
         private readonly ISplendorRepository _configRepo;
+        private readonly ILogger<TutorialSplendorService> _logger;
 
         // =====================================================================
         // TUTORIAL BOARD: Card IDs từ MongoDB (cố định)
@@ -25,7 +27,7 @@ namespace CleanArchitecture.Application.Service
         private static readonly HashSet<string> TutorialVisibleCardIds = new()
         {
             // Level 1
-            "c17", "c9", "c25", "c8",
+            "c8", "c4", "c11", "c3",
             // Level 2
             "c53", "c59", "c67", "c62",
             // Level 3
@@ -38,12 +40,14 @@ namespace CleanArchitecture.Application.Service
             ISplendorService splendorService,
             IGameStateStore stateStore,
             IRedisMapper redisMapper,
-            ISplendorRepository configRepo)
+            ISplendorRepository configRepo,
+            ILogger<TutorialSplendorService> logger)
         {
             _splendorService = splendorService;
             _stateStore = stateStore;
             _redisMapper = redisMapper;
             _configRepo = configRepo;
+            _logger = logger;
         }
 
         // =====================================================================
@@ -287,45 +291,101 @@ namespace CleanArchitecture.Application.Service
         // =====================================================================
         public async Task<CollectGemResult> CollectGemsAsync(string playerId, Dictionary<GemColor, int> gems)
         {
-            var roomCode = GetRoomCode(playerId);
-            return await _splendorService.CollectGemsAsync(roomCode, playerId, gems);
+            try
+            {
+                var roomCode = GetRoomCode(playerId);
+                return await _splendorService.CollectGemsAsync(roomCode, playerId, gems);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[TutorialService] CollectGemsAsync failed — playerId={P}", playerId);
+                throw;
+            }
         }
 
         public async Task<bool> DiscardGemsAsync(string playerId, Dictionary<GemColor, int> gems)
         {
-            var roomCode = GetRoomCode(playerId);
-            return await _splendorService.DiscardGemsAsync(roomCode, playerId, gems);
+            try
+            {
+                var roomCode = GetRoomCode(playerId);
+                return await _splendorService.DiscardGemsAsync(roomCode, playerId, gems);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[TutorialService] DiscardGemsAsync failed — playerId={P}", playerId);
+                throw;
+            }
         }
 
         public async Task<PurchaseCardResult> PurchaseCardAsync(string playerId, Guid cardId)
         {
-            var roomCode = GetRoomCode(playerId);
-            return await _splendorService.PurchaseCardAsync(roomCode, playerId, cardId);
+            try
+            {
+                var roomCode = GetRoomCode(playerId);
+                return await _splendorService.PurchaseCardAsync(roomCode, playerId, cardId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[TutorialService] PurchaseCardAsync failed — playerId={P}", playerId);
+                throw;
+            }
         }
 
         public async Task<SelectNobleResult> SelectNobleAsync(string playerId, Guid nobleId)
         {
-            var roomCode = GetRoomCode(playerId);
-            return await _splendorService.SelectNobleAsync(roomCode, playerId, nobleId);
+            try
+            {
+                var roomCode = GetRoomCode(playerId);
+                return await _splendorService.SelectNobleAsync(roomCode, playerId, nobleId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[TutorialService] SelectNobleAsync failed — playerId={P}", playerId);
+                throw;
+            }
         }
 
         public async Task<ReserveCardResult> ReserveCardAsync(string playerId, Guid? cardId, int? level = null)
         {
-            var roomCode = GetRoomCode(playerId);
-            return await _splendorService.ReserveCardAsync(roomCode, playerId, cardId, level);
+            try
+            {
+                var roomCode = GetRoomCode(playerId);
+                return await _splendorService.ReserveCardAsync(roomCode, playerId, cardId, level);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[TutorialService] ReserveCardAsync failed — playerId={P}", playerId);
+                throw;
+            }
         }
 
         public async Task<GameContext?> GetTutorialStateAsync(string playerId)
         {
-            return await _stateStore.LoadGameContext(GetRoomCode(playerId));
+            try
+            {
+                return await _stateStore.LoadGameContext(GetRoomCode(playerId));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[TutorialService] GetTutorialStateAsync failed — playerId={P}", playerId);
+                throw;
+            }
         }
 
         // Tutorial không lưu Mongo, chỉ xóa Redis
         public async Task EndTutorialAsync(string playerId)
         {
-            var roomCode = GetRoomCode(playerId);
-            await _stateStore.DeleteGameContext(roomCode);
-            await _redisMapper.DeleteGame(roomCode);
+            try
+            {
+                var roomCode = GetRoomCode(playerId);
+                await _stateStore.DeleteGameContext(roomCode);
+                await _redisMapper.DeleteGame(roomCode);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[TutorialService] EndTutorialAsync failed — playerId={P}", playerId);
+                throw;
+            }
         }
 
         // =====================================================================

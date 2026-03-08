@@ -3,6 +3,7 @@ using CleanArchitecture.Application.IService;
 using CleanArchitecture.Application.Service;
 using CleanArchitecture.Domain.Model.Splendor.Enum;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
 using System.Text.Json;
 
 namespace CleanArchitecture.SignalR.Hubs
@@ -13,17 +14,20 @@ namespace CleanArchitecture.SignalR.Hubs
         private readonly IBotService _botService;
         private readonly IRedisMapper _redisMapper;
         private readonly ITutorialSessionRepository _sessionRepo;
+        private readonly ILogger<TutorialGameHub> _logger;
 
         public TutorialGameHub(
             ITutorialSplendorService tutorialService,
             IBotService botService,
             IRedisMapper redisMapper,
-            ITutorialSessionRepository sessionRepo)
+            ITutorialSessionRepository sessionRepo,
+            ILogger<TutorialGameHub> logger)
         {
             _tutorialService = tutorialService;
             _botService = botService;
             _redisMapper = redisMapper;
             _sessionRepo = sessionRepo;
+            _logger = logger;
         }
 
         // =====================================================================
@@ -31,46 +35,52 @@ namespace CleanArchitecture.SignalR.Hubs
         // =====================================================================
         public async Task StartTutorial(string playerId, string playerName)
         {
-            var roomCode = TutorialSplendorService.GetRoomCode(playerId);
-
-            await Groups.AddToGroupAsync(Context.ConnectionId, roomCode);
-
-            // Xóa disconnect mark nếu có (player reconnect trong grace period)
-            await _sessionRepo.ClearDisconnectMarkAsync(playerId);
-
-            // Kiểm tra session cũ còn trong Redis không
-            var existingContext = await _tutorialService.GetTutorialStateAsync(playerId);
-
-            if (existingContext != null)
+            try
             {
-                // RECONNECT: session còn sống → restore step cũ
-                var savedStep = await _sessionRepo.LoadStepAsync(playerId);
+                var roomCode = TutorialSplendorService.GetRoomCode(playerId);
+                await Groups.AddToGroupAsync(Context.ConnectionId, roomCode);
+                await _sessionRepo.ClearDisconnectMarkAsync(playerId);
 
-                await Clients.Caller.SendAsync("TutorialReconnected", new
+                var existingContext = await _tutorialService.GetTutorialStateAsync(playerId);
+
+                if (existingContext != null)
+                {
+                    // RECONNECT: game context còn sống → restore step
+                    var savedStep = await _sessionRepo.LoadStepAsync(playerId);
+                    await Clients.Caller.SendAsync("TutorialReconnected", new
+                    {
+                        roomCode,
+                        stepIndex = savedStep?.stepIndex ?? 0,
+                        phase = savedStep?.phase ?? "GUIDED",
+                        message = "Kết nối lại thành công! Tiếp tục từ chỗ bạn dừng."
+                    });
+                    await BroadcastState(playerId);
+                    return;
+                }
+
+                // Game context KHÔNG còn (bị cleanup hoặc chưa tạo)
+                // → xóa step cũ (nếu có) để tránh restore step lệch với board mới
+                await _sessionRepo.DeleteStepAsync(playerId);
+
+                // NEW SESSION
+                await _tutorialService.StartTutorialAsync(playerId, playerName);
+                await _sessionRepo.SaveStepAsync(playerId, 0, "GUIDED");
+
+                await Clients.Caller.SendAsync("TutorialStarted", new
                 {
                     roomCode,
-                    stepIndex = savedStep?.stepIndex ?? 0,
-                    phase = savedStep?.phase ?? "GUIDED",
-                    message = "Kết nối lại thành công! Tiếp tục từ chỗ bạn dừng."
+                    stepIndex = 0,
+                    phase = "GUIDED",
+                    message = "Tutorial bắt đầu! Bạn đi trước."
                 });
 
                 await BroadcastState(playerId);
-                return;
             }
-
-            // NEW SESSION
-            await _tutorialService.StartTutorialAsync(playerId, playerName);
-            await _sessionRepo.SaveStepAsync(playerId, 0, "GUIDED");
-
-            await Clients.Caller.SendAsync("TutorialStarted", new
+            catch (Exception ex)
             {
-                roomCode,
-                stepIndex = 0,
-                phase = "GUIDED",
-                message = "Tutorial bắt đầu! Bạn đi trước."
-            });
-
-            await BroadcastState(playerId);
+                _logger.LogError(ex, "[Hub] StartTutorial failed — playerId={PlayerId}", playerId);
+                await Clients.Caller.SendAsync("Error", new { message = "Không thể bắt đầu tutorial.", code = "START_TUTORIAL_ERROR" });
+            }
         }
 
         // =====================================================================
@@ -78,35 +88,37 @@ namespace CleanArchitecture.SignalR.Hubs
         // =====================================================================
         public async Task SaveTutorialStep(string playerId, int stepIndex, string phase)
         {
-            await _sessionRepo.SaveStepAsync(playerId, stepIndex, phase);
+            try { await _sessionRepo.SaveStepAsync(playerId, stepIndex, phase); }
+            catch (Exception ex) { _logger.LogError(ex, "[Hub] SaveTutorialStep failed — playerId={P}", playerId); }
         }
 
         // =====================================================================
         // COLLECT GEMS
         // =====================================================================
-        public async Task CollectGems(string playerId, Dictionary<GemColor, int> gems)
+        public async Task<object> CollectGems(string playerId, Dictionary<GemColor, int> gems)
         {
-            var result = await _tutorialService.CollectGemsAsync(playerId, gems);
-
-            if (!result.Success)
+            try
             {
-                await Clients.Caller.SendAsync("Error", new { message = "Lấy gem không hợp lệ.", code = "COLLECT_GEM_ERROR" });
-                return;
-            }
-
-            await BroadcastState(playerId);
-
-            if (result.NeedsDiscard)
-            {
-                await Clients.Caller.SendAsync("NeedDiscard", new
+                var result = await _tutorialService.CollectGemsAsync(playerId, gems);
+                if (!result.Success)
                 {
-                    currentGems = result.CurrentGems,
-                    excessCount = result.TotalGems - 10
-                });
-                return;
+                    await Clients.Caller.SendAsync("Error", new { message = "Lấy gem không hợp lệ.", code = "COLLECT_GEM_ERROR" });
+                    return new { success = false, message = "Lấy gem không hợp lệ." };
+                }
+                await BroadcastState(playerId);
+                if (result.NeedsDiscard)
+                {
+                    await Clients.Caller.SendAsync("NeedsDiscard", new { currentGems = result.CurrentGems, excessCount = result.TotalGems - 10 });
+                    return new { success = true };
+                }
+                await TriggerBotTurn(playerId);
+                return new { success = true };
             }
-
-            await TriggerBotTurn(playerId);
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Hub] CollectGems failed — playerId={P}", playerId);
+                return new { success = false, message = "Lỗi server khi lấy gem." };
+            }
         }
 
         // =====================================================================
@@ -114,16 +126,17 @@ namespace CleanArchitecture.SignalR.Hubs
         // =====================================================================
         public async Task DiscardGems(string playerId, Dictionary<GemColor, int> gems)
         {
-            var success = await _tutorialService.DiscardGemsAsync(playerId, gems);
-
-            if (!success)
+            try
             {
-                await Clients.Caller.SendAsync("Error", new { message = "Bỏ gem không hợp lệ.", code = "DISCARD_GEM_ERROR" });
-                return;
+                var success = await _tutorialService.DiscardGemsAsync(playerId, gems);
+                if (!success) { await Clients.Caller.SendAsync("Error", new { message = "Bỏ gem không hợp lệ.", code = "DISCARD_GEM_ERROR" }); return; }
+                await BroadcastState(playerId);
+                await TriggerBotTurn(playerId);
             }
-
-            await BroadcastState(playerId);
-            await TriggerBotTurn(playerId);
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Hub] DiscardGems failed — playerId={P}", playerId);
+            }
         }
 
         // =====================================================================
@@ -131,37 +144,44 @@ namespace CleanArchitecture.SignalR.Hubs
         // =====================================================================
         public async Task PurchaseCard(string playerId, Guid cardId)
         {
-            var result = await _tutorialService.PurchaseCardAsync(playerId, cardId);
-
-            if (!result.Success)
+            try
             {
-                await Clients.Caller.SendAsync("Error", new { message = "Không đủ gem để mua card này.", code = "PURCHASE_CARD_ERROR" });
-                return;
-            }
+                var result = await _tutorialService.PurchaseCardAsync(playerId, cardId);
 
-            if (result.IsGameOver)
-            {
-                await BroadcastGameOverState(playerId);
-                await Clients.Caller.SendAsync("GameOver", new { winner = result.Winner });
-                await Clients.Caller.SendAsync("TutorialCompleted", new
+                if (!result.Success)
                 {
-                    winner = result.Winner,
-                    message = "🎉 Chúc mừng! Bạn đã thắng ván tutorial đầu tiên!"
-                });
-                await _tutorialService.EndTutorialAsync(playerId);
-                await _sessionRepo.DeleteStepAsync(playerId);
-                return;
+                    await Clients.Caller.SendAsync("Error", new { message = "Không đủ gem để mua card này.", code = "PURCHASE_CARD_ERROR" });
+                    return;
+                }
+
+                if (result.IsGameOver)
+                {
+                    await BroadcastGameOverState(playerId);
+                    await Clients.Caller.SendAsync("GameOver", new { winner = result.Winner });
+                    await Clients.Caller.SendAsync("TutorialCompleted", new
+                    {
+                        winner = result.Winner,
+                        message = "🎉 Chúc mừng! Bạn đã thắng ván tutorial đầu tiên!"
+                    });
+                    await _tutorialService.EndTutorialAsync(playerId);
+                    await _sessionRepo.DeleteStepAsync(playerId);
+                    return;
+                }
+
+                await BroadcastState(playerId);
+
+                if (result.NeedsSelectNoble)
+                {
+                    await Clients.Caller.SendAsync("NeedSelectNoble", new { eligibleNobles = result.EligibleNobles });
+                    return;
+                }
+
+                await TriggerBotTurn(playerId);
             }
-
-            await BroadcastState(playerId);
-
-            if (result.NeedsSelectNoble)
+            catch (Exception ex)
             {
-                await Clients.Caller.SendAsync("NeedSelectNoble", new { eligibleNobles = result.EligibleNobles });
-                return;
+                _logger.LogError(ex, "[Hub] PurchaseCard failed — playerId={P}", playerId);
             }
-
-            await TriggerBotTurn(playerId);
         }
 
         // =====================================================================
@@ -169,30 +189,37 @@ namespace CleanArchitecture.SignalR.Hubs
         // =====================================================================
         public async Task SelectNoble(string playerId, Guid nobleId)
         {
-            var result = await _tutorialService.SelectNobleAsync(playerId, nobleId);
-
-            if (!result.Success)
+            try
             {
-                await Clients.Caller.SendAsync("Error", new { message = "Noble không hợp lệ.", code = "SELECT_NOBLE_ERROR" });
-                return;
-            }
+                var result = await _tutorialService.SelectNobleAsync(playerId, nobleId);
 
-            if (result.IsGameOver)
-            {
-                await BroadcastGameOverState(playerId);
-                await Clients.Caller.SendAsync("GameOver", new { winner = result.Winner });
-                await Clients.Caller.SendAsync("TutorialCompleted", new
+                if (!result.Success)
                 {
-                    winner = result.Winner,
-                    message = "🎉 Chúc mừng! Bạn đã thắng ván tutorial đầu tiên!"
-                });
-                await _tutorialService.EndTutorialAsync(playerId);
-                await _sessionRepo.DeleteStepAsync(playerId);
-                return;
-            }
+                    await Clients.Caller.SendAsync("Error", new { message = "Noble không hợp lệ.", code = "SELECT_NOBLE_ERROR" });
+                    return;
+                }
 
-            await BroadcastState(playerId);
-            await TriggerBotTurn(playerId);
+                if (result.IsGameOver)
+                {
+                    await BroadcastGameOverState(playerId);
+                    await Clients.Caller.SendAsync("GameOver", new { winner = result.Winner });
+                    await Clients.Caller.SendAsync("TutorialCompleted", new
+                    {
+                        winner = result.Winner,
+                        message = "🎉 Chúc mừng! Bạn đã thắng ván tutorial đầu tiên!"
+                    });
+                    await _tutorialService.EndTutorialAsync(playerId);
+                    await _sessionRepo.DeleteStepAsync(playerId);
+                    return;
+                }
+
+                await BroadcastState(playerId);
+                await TriggerBotTurn(playerId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Hub] SelectNoble failed — playerId={P}", playerId);
+            }
         }
 
         // =====================================================================
@@ -200,27 +227,34 @@ namespace CleanArchitecture.SignalR.Hubs
         // =====================================================================
         public async Task ReserveCard(string playerId, Guid? cardId, int? level = null)
         {
-            var result = await _tutorialService.ReserveCardAsync(playerId, cardId, level);
-
-            if (!result.Success)
+            try
             {
-                await Clients.Caller.SendAsync("Error", new { message = "Không thể reserve card này.", code = "RESERVE_CARD_ERROR" });
-                return;
-            }
+                var result = await _tutorialService.ReserveCardAsync(playerId, cardId, level);
 
-            await BroadcastState(playerId);
-
-            if (result.NeedsDiscard)
-            {
-                await Clients.Caller.SendAsync("NeedDiscard", new
+                if (!result.Success)
                 {
-                    currentGems = result.CurrentGems,
-                    excessCount = result.TotalGems - 10
-                });
-                return;
-            }
+                    await Clients.Caller.SendAsync("Error", new { message = "Không thể reserve card này.", code = "RESERVE_CARD_ERROR" });
+                    return;
+                }
 
-            await TriggerBotTurn(playerId);
+                await BroadcastState(playerId);
+
+                if (result.NeedsDiscard)
+                {
+                    await Clients.Caller.SendAsync("NeedDiscard", new
+                    {
+                        currentGems = result.CurrentGems,
+                        excessCount = result.TotalGems - 10
+                    });
+                    return;
+                }
+
+                await TriggerBotTurn(playerId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Hub] ReserveCard failed — playerId={P}", playerId);
+            }
         }
 
         // =====================================================================
@@ -228,24 +262,31 @@ namespace CleanArchitecture.SignalR.Hubs
         // =====================================================================
         private async Task TriggerBotTurn(string playerId)
         {
-            var roomCode = TutorialSplendorService.GetRoomCode(playerId);
-
-            await Clients.Caller.SendAsync("BotThinking", new { message = "Bot đang suy nghĩ..." });
-
-            await _botService.TakeTurnAsync(roomCode, delayMs: 1500);
-
-            var context = await _tutorialService.GetTutorialStateAsync(playerId);
-            if (context == null)
+            try
             {
-                await Clients.Caller.SendAsync("TutorialFailed", new
-                {
-                    message = "Bot đã thắng lần này! Thử lại nhé 💪"
-                });
-                return;
-            }
+                var roomCode = TutorialSplendorService.GetRoomCode(playerId);
 
-            await BroadcastState(playerId);
-            await Clients.Caller.SendAsync("YourTurn", new { message = "Đến lượt bạn!" });
+                await Clients.Caller.SendAsync("BotThinking", new { message = "Bot đang suy nghĩ..." });
+
+                await _botService.TakeTurnAsync(roomCode, delayMs: 00);
+
+                var context = await _tutorialService.GetTutorialStateAsync(playerId);
+                if (context == null)
+                {
+                    await Clients.Caller.SendAsync("TutorialFailed", new
+                    {
+                        message = "Bot đã thắng lần này! Thử lại nhé 💪"
+                    });
+                    return;
+                }
+
+                await BroadcastState(playerId);
+                await Clients.Caller.SendAsync("YourTurn", new { message = "Đến lượt bạn!" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Hub] TriggerBotTurn failed — playerId={P}", playerId);
+            }
         }
 
         // =====================================================================
@@ -253,24 +294,31 @@ namespace CleanArchitecture.SignalR.Hubs
         // =====================================================================
         private async Task BroadcastState(string playerId)
         {
-            var roomCode = TutorialSplendorService.GetRoomCode(playerId);
-
-            var info = await _redisMapper.GetGameInfo(roomCode);
-            var players = await _redisMapper.GetPlayers(roomCode);
-            var board = await _redisMapper.GetBoard(roomCode);
-            var turn = await _redisMapper.GetTurn(roomCode);
-            var cardDecks = await _redisMapper.GetCardDecks(roomCode);
-
-            var response = new
+            try
             {
-                info = info != null ? JsonSerializer.Deserialize<object>(info) : null,
-                players = players?.ToDictionary(kv => kv.Key, kv => JsonSerializer.Deserialize<object>(kv.Value)),
-                board = board != null ? JsonSerializer.Deserialize<object>(board) : null,
-                turn = turn != null ? JsonSerializer.Deserialize<object>(turn) : null,
-                cardDecks = cardDecks != null ? JsonSerializer.Deserialize<object>(cardDecks) : null,
-            };
+                var roomCode = TutorialSplendorService.GetRoomCode(playerId);
 
-            await Clients.Caller.SendAsync("GameStateUpdated", response);
+                var info = await _redisMapper.GetGameInfo(roomCode);
+                var players = await _redisMapper.GetPlayers(roomCode);
+                var board = await _redisMapper.GetBoard(roomCode);
+                var turn = await _redisMapper.GetTurn(roomCode);
+                var cardDecks = await _redisMapper.GetCardDecks(roomCode);
+
+                var response = new
+                {
+                    info = info != null ? JsonSerializer.Deserialize<object>(info) : null,
+                    players = players?.ToDictionary(kv => kv.Key, kv => JsonSerializer.Deserialize<object>(kv.Value)),
+                    board = board != null ? JsonSerializer.Deserialize<object>(board) : null,
+                    turn = turn != null ? JsonSerializer.Deserialize<object>(turn) : null,
+                    cardDecks = cardDecks != null ? JsonSerializer.Deserialize<object>(cardDecks) : null,
+                };
+
+                await Clients.Caller.SendAsync("GameStateUpdated", response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Hub] BroadcastState failed — playerId={P}", playerId);
+            }
         }
 
         // =====================================================================

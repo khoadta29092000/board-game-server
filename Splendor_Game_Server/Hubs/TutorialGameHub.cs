@@ -47,11 +47,16 @@ namespace CleanArchitecture.SignalR.Hubs
                 {
                     // RECONNECT: game context còn sống → restore step
                     var savedStep = await _sessionRepo.LoadStepAsync(playerId);
-                    await Clients.Caller.SendAsync("TutorialReconnected", new
+                    // Chỉ restore GUIDED phase với stepIndex hợp lệ
+                    // FREE_PLAY / TRANSITION / null → reset về 0:GUIDED
+                    var restorePhase = "GUIDED";
+
+                        await Clients.Caller.SendAsync("TutorialReady", new
                     {
                         roomCode,
-                        stepIndex = savedStep?.stepIndex ?? 0,
-                        phase = savedStep?.phase ?? "GUIDED",
+                        stepIndex = savedStep.Value.stepIndex,
+                        phase = savedStep.Value.phase,
+                        isReconnect = true,
                         message = "Kết nối lại thành công! Tiếp tục từ chỗ bạn dừng."
                     });
                     await BroadcastState(playerId);
@@ -64,13 +69,12 @@ namespace CleanArchitecture.SignalR.Hubs
 
                 // NEW SESSION
                 await _tutorialService.StartTutorialAsync(playerId, playerName);
-                await _sessionRepo.SaveStepAsync(playerId, 0, "GUIDED");
-
-                await Clients.Caller.SendAsync("TutorialStarted", new
+                await Clients.Caller.SendAsync("TutorialReady", new
                 {
                     roomCode,
                     stepIndex = 0,
                     phase = "GUIDED",
+                    isReconnect = false,
                     message = "Tutorial bắt đầu! Bạn đi trước."
                 });
 
@@ -90,6 +94,16 @@ namespace CleanArchitecture.SignalR.Hubs
         {
             try { await _sessionRepo.SaveStepAsync(playerId, stepIndex, phase); }
             catch (Exception ex) { _logger.LogError(ex, "[Hub] SaveTutorialStep failed — playerId={P}", playerId); }
+        }
+
+        // =====================================================================
+        // DELETE STEP — FE gọi khi chuyển sang FREE_PLAY / TRANSITION / DONE
+        // Xóa step khỏi Redis để reconnect luôn reset về 0:GUIDED
+        // =====================================================================
+        public async Task DeleteTutorialStep(string playerId)
+        {
+            try { await _sessionRepo.DeleteStepAsync(playerId); }
+            catch (Exception ex) { _logger.LogError(ex, "[Hub] DeleteTutorialStep failed — playerId={P}", playerId); }
         }
 
         // =====================================================================
@@ -174,7 +188,7 @@ namespace CleanArchitecture.SignalR.Hubs
                     });
                     await _tutorialService.EndTutorialAsync(playerId);
                     await _sessionRepo.DeleteStepAsync(playerId);
-                    return new { success = true};
+                    return new { success = true };
                 }
 
                 await BroadcastState(playerId);

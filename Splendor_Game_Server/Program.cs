@@ -9,6 +9,7 @@ using CleanArchitecture.Infrastructure.Redis;
 using CleanArchitecture.Infrastructure.Repository;
 using CleanArchitecture.Infrastructure.Security;
 using CleanArchitecture.Presentation.Hubs;
+using CleanArchitecture.SignalR.Hubs;
 using GraphQL;
 using MessagePack;
 using MessagePack.Resolvers;
@@ -246,6 +247,10 @@ builder.Services.AddSingleton<IRoomService, RoomService>();
 builder.Services.AddSingleton<IRoomRepository, RoomRepository>();
 builder.Services.AddSingleton<IGameHistoryRepository, GameHistoryRepository>();
 builder.Services.AddSingleton<IGameHistoryService, GameHistoryService>();
+builder.Services.AddSingleton<ITutorialSplendorService, TutorialSplendorService>();
+builder.Services.AddSingleton<IBotService, BotService>();
+builder.Services.AddSingleton<ITutorialSessionRepository, RedisTutorialSessionRepository>();
+builder.Services.AddHostedService<TutorialCleanupService>();
 
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<IUserConnectionService, UserConnectionService>();
@@ -428,6 +433,7 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHub<RoomHub>("/roomHub");
 app.MapHub<GameHub>("/gameHub");
+app.MapHub<TutorialGameHub>("/tutorialGameHub");
 app.MapGraphQL("/graphql");
 
 app.Run();

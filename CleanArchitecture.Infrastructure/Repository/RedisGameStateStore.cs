@@ -37,23 +37,27 @@ namespace CleanArchitecture.Infrastructure.Repository
 
         public async Task<GameContext?> LoadGameContext(string roomCode)
         {
-          
-                var value = await _db.StringGetAsync($"splendor:game:{roomCode}");
-                if (value.IsNullOrEmpty)
-                    return null;
 
-                return JsonSerializer.Deserialize<GameContext>(value!, _jsonOptions);
-          
+            var value = await _db.StringGetAsync($"splendor:game:{roomCode}");
+            if (value.IsNullOrEmpty)
+                return null;
+
+            return JsonSerializer.Deserialize<GameContext>(value!, _jsonOptions);
+
         }
 
         public async Task DeleteGameContext(string roomCode)
         {
-            await _db.KeyDeleteAsync($"splendor:game:{roomCode}");
-
-            await _db.KeyDeleteAsync($"game:{roomCode}:players");
-            await _db.KeyDeleteAsync($"game:{roomCode}:turn");
-            await _db.KeyDeleteAsync($"game:{roomCode}:board");
-            await _db.KeyDeleteAsync($"game:{roomCode}:info");
+            // Batch delete — 1 round trip thay vì 5
+            var keys = new RedisKey[]
+            {
+                $"splendor:game:{roomCode}",
+                $"game:{roomCode}:info",
+                $"game:{roomCode}:players",
+                $"game:{roomCode}:board",
+                $"game:{roomCode}:turn"
+            };
+            await _db.KeyDeleteAsync(keys);
         }
         #endregion
 

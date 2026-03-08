@@ -31,6 +31,28 @@ namespace CleanArchitecture.SignalR.Hubs
         }
 
         // =====================================================================
+        // PASS TURN — player gọi khi không có action hợp lệ nào
+        // =====================================================================
+        public async Task<object> PassTurn(string playerId)
+        {
+            try
+            {
+                var success = await _tutorialService.PassTurnAsync(playerId);
+                if (!success)
+                    return new { success = false, message = "Không thể pass turn lúc này." };
+
+                await BroadcastState(playerId);
+                await TriggerBotTurn(playerId);
+                return new { success = true };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Hub] PassTurn failed — playerId={P}", playerId);
+                return new { success = false, message = "Lỗi server khi pass turn." };
+            }
+        }
+
+        // =====================================================================
         // START TUTORIAL / RECONNECT
         // =====================================================================
         public async Task StartTutorial(string playerId, string playerName)

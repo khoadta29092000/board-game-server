@@ -391,8 +391,53 @@ namespace CleanArchitecture.Presentation.Hubs
                 throw;
             }
         }
+        public async Task<object> AddBotToRoom()
+        {
+            try
+            {
+                var (playerId, _) = await GetValidatedPlayerInfo();
 
+                var userConnection = await _userConnectionService.GetUserByConnection(Context.ConnectionId);
+                if (userConnection?.RoomId == null)
+                    throw new InvalidOperationException("You are not in any room");
 
+                var roomId = userConnection.RoomId;
+                var room = await _roomService.GetRoomById(roomId);
+                if (room == null) throw new InvalidOperationException("Room not found");
+
+                // Chỉ owner mới được add bot
+                var owner = room.Players?.FirstOrDefault(p => p.IsOwner);
+                if (owner?.PlayerId != playerId)
+                    throw new UnauthorizedOperationException("Only room owner can add a bot");
+
+                var botId = $"BOT_{Guid.NewGuid():N}"; 
+                var botName = "AI Bot";
+
+                // Kiểm tra bot chưa có trong room
+                if (room.Players?.Any(p => p.PlayerId.StartsWith("BOT_")) == true)
+                    return new { success = false, error = "Bot already in room" };
+
+                // Add bot vào room (dùng JoinRoom của service)
+                var updatedRoom = await _roomService.AddBotToRoom(roomId, botId, botName);
+
+                _logger.LogInformation("🤖 Bot {BotId} added to room {RoomId}", botId, roomId);
+
+                await Clients.Group($"Room_{roomId}").SendAsync("PlayerJoined", new
+                {
+                    playerId = botId,
+                    playerName = botName,
+                    room = updatedRoom,
+                    isBot = true
+                });
+                await Clients.Group("RoomList").SendAsync("RoomUpdated", updatedRoom);
+
+                return new { success = true, room = updatedRoom };
+            }
+            catch (Exception ex)
+            {
+                return await HandleHubError(ex, "Failed to add bot to room");
+            }
+        }
         private async Task<object> HandleHubError(Exception ex, string defaultMessage)
         {
             var errorMessage = ex switch

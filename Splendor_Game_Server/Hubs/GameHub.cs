@@ -17,6 +17,7 @@ namespace Splendor_Game_Server.Hubs
         private readonly IRedisMapper _redisMapper;
         private readonly IUserConnectionService _userConnectionService;
         private readonly IGameHistoryService _historyService;
+        private readonly IBotService _botService;
         private readonly ILogger<GameHub> _logger;
 
         public GameHub(
@@ -24,13 +25,33 @@ namespace Splendor_Game_Server.Hubs
             IRedisMapper redisMapper,
             IUserConnectionService userConnectionService,
             IGameHistoryService historyService,
+            IKeyedServiceProvider keyedServices,
             ILogger<GameHub> logger)
         {
             _gameService = gameService;
             _redisMapper = redisMapper;
             _userConnectionService = userConnectionService;
             _historyService = historyService;
+            _botService = keyedServices.GetRequiredKeyedService<IBotService>("ai");
             _logger = logger;
+        }
+
+        private bool IsBot(string playerId) => playerId.StartsWith("BOT_");
+
+        private async Task TriggerBotTurnIfNeeded(string gameId)
+        {
+            // Đọc turn hiện tại từ Redis
+            var turnJson = await _redisMapper.GetTurn(gameId);
+            if (turnJson == null) return;
+
+            var turn = JsonSerializer.Deserialize<JsonElement>(turnJson);
+            var nextPlayerId = turn.GetProperty("currentPlayer").GetString();
+
+            if (nextPlayerId != null && IsBot(nextPlayerId))
+            {
+                await Clients.Group($"game:{gameId}").SendAsync("BotThinking", new { message = "Bot đang suy nghĩ..." });
+                _ = _botService.TakeTurnAsync(gameId, delayMs: 2000); // fire & forget
+            }
         }
 
         // =====================================================================
@@ -214,6 +235,8 @@ namespace Splendor_Game_Server.Hubs
                         excessCount = result.TotalGems - 10
                     });
                 }
+                if (!result.NeedsDiscard)
+                    await TriggerBotTurnIfNeeded(gameId);
 
                 return new { success = true };
             }
@@ -241,6 +264,7 @@ namespace Splendor_Game_Server.Hubs
                 }
 
                 await BroadcastGameState(gameId);
+                await TriggerBotTurnIfNeeded(gameId);
 
                 return new { success = true };
             }
@@ -275,7 +299,8 @@ namespace Splendor_Game_Server.Hubs
                 else
                 {
                     await BroadcastGameState(gameId);
-
+                    if (!result.NeedsSelectNoble)
+                        await TriggerBotTurnIfNeeded(gameId);
                     if (result.JustTriggeredLastRound)
                     {
                         await Clients.Group($"game:{gameId}").SendAsync("LastRound", new
@@ -326,6 +351,7 @@ namespace Splendor_Game_Server.Hubs
                 else
                 {
                     await BroadcastGameState(gameId);
+                    await TriggerBotTurnIfNeeded(gameId);
 
                     if (result.JustTriggeredLastRound)
                     {
@@ -373,6 +399,8 @@ namespace Splendor_Game_Server.Hubs
                         excessCount = result.TotalGems - 10
                     });
                 }
+                if (!result.NeedsDiscard)
+                    await TriggerBotTurnIfNeeded(gameId);
 
                 return new { success = true };
             }
@@ -394,7 +422,8 @@ namespace Splendor_Game_Server.Hubs
                 if (!success)
                     return new { success = false, message = "can't pass turn." };
 
-                await BroadcastGameState(playerId);
+                await BroadcastGameState(gameId);
+                await TriggerBotTurnIfNeeded(gameId);
                 return new { success = true };
             }
             catch (Exception ex)

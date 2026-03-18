@@ -20,30 +20,49 @@ namespace CleanArchitecture.Infrastructure.Repository
         // Key lưu step:phase theo từng player
         private const string StepPrefix = "tutorial:step:";
 
+        private const string RoomCodePrefix = "tutorial:roomcode:";
+
         public RedisTutorialSessionRepository(IConnectionMultiplexer redis)
         {
             _db = redis.GetDatabase();
         }
 
-        public async Task MarkDisconnectedAsync(string playerId)
+        public async Task MarkDisconnectedAsync(string playerId, string roomCode)
         {
             var timeKey = $"{DisconnectTimePrefix}{playerId}";
+            var roomKey = $"{RoomCodePrefix}{playerId}";
 
             await Task.WhenAll(
                 _db.SetAddAsync(DisconnectedSetKey, playerId),
-                _db.StringSetAsync(
-                    timeKey,
+                _db.StringSetAsync(timeKey,
                     DateTimeOffset.UtcNow.ToString("O"),
-                    expiry: TimeSpan.FromMinutes(15) // TTL safety net nếu cleanup service bị lỗi
-                )
+                    expiry: TimeSpan.FromMinutes(15)),
+                _db.StringSetAsync(roomKey,
+                    roomCode,
+                    expiry: TimeSpan.FromMinutes(15))  // cùng TTL
             );
+        }
+        public async Task SaveRoomCodeAsync(string playerId, string roomCode)
+        {
+            await _db.StringSetAsync(
+                $"{RoomCodePrefix}{playerId}",
+                roomCode,
+                expiry: TimeSpan.FromHours(2)
+            );
+        }
+
+        public async Task<string?> GetRoomCodeAsync(string playerId)
+        {
+            var raw = await _db.StringGetAsync($"{RoomCodePrefix}{playerId}");
+            return raw.HasValue ? raw.ToString() : null;
         }
 
         public async Task ClearDisconnectMarkAsync(string playerId)
         {
             await Task.WhenAll(
                 _db.SetRemoveAsync(DisconnectedSetKey, playerId),
-                _db.KeyDeleteAsync($"{DisconnectTimePrefix}{playerId}")
+                _db.KeyDeleteAsync($"{DisconnectTimePrefix}{playerId}"),
+                _db.KeyDeleteAsync($"{RoomCodePrefix}{playerId}")
             );
         }
 
@@ -68,7 +87,8 @@ namespace CleanArchitecture.Infrastructure.Repository
         {
             await Task.WhenAll(
                 _db.SetRemoveAsync(DisconnectedSetKey, playerId),
-                _db.KeyDeleteAsync($"{DisconnectTimePrefix}{playerId}")
+                _db.KeyDeleteAsync($"{DisconnectTimePrefix}{playerId}"),
+                _db.KeyDeleteAsync($"{RoomCodePrefix}{playerId}")
             );
         }
 

@@ -66,6 +66,27 @@ namespace Splendor_Game_Server.Controllers
                 return StatusCode(400, new { StatusCode = 400, Message = ex.Message });
             }
         }
+        [HttpPost("Guest_Token")]
+        [AllowAnonymous]
+        public IActionResult CreateGuestToken([FromBody] GuestTokenRequest request)
+        {
+            if (string.IsNullOrEmpty(request?.Name))
+                return BadRequest(new { StatusCode = 400, Message = "Name is required" });
+
+            var guestId = $"GUEST_{Guid.NewGuid():N}";
+
+            var guestPlayer = new Player
+            {
+                Id = guestId,
+                Name = request.Name,
+                Username = $"guest_{guestId[6..14]}",
+                IsActive = true,
+                IsVerified = true
+            };
+
+            var token = securityUtility.GenerateToken(guestPlayer, 3);
+            return Ok(new { StatusCode = 200, Message = "Guest token created", data = token });
+        }
         [HttpPost("Login")]
         public async Task<IActionResult> GetLogin(LoginPlayer acc)
         {
@@ -456,8 +477,24 @@ namespace Splendor_Game_Server.Controllers
         {
             try
             {
-                string? palyerId = User.FindFirst("Id")?.Value;
-                Player? oldPlayer = await playerService.GetMemberById(palyerId);
+                string? playerId = User.FindFirst("Id")?.Value;
+
+                if (playerId?.StartsWith("GUEST_") == true)
+                {
+                    return Ok(new
+                    {
+                        StatusCode = 200,
+                        Message = "load successful",
+                        data = new
+                        {
+                            Id = playerId,
+                            Name = User.FindFirst("Name")?.Value ?? "Guest",
+                            Username = User.FindFirst("Email")?.Value ?? ""
+                        }
+                    });
+                }
+
+                Player? oldPlayer = await playerService.GetMemberById(playerId);
 
                 return Ok(new
                 {

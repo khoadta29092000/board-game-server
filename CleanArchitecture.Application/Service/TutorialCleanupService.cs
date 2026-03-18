@@ -18,8 +18,8 @@ namespace CleanArchitecture.Application.Service
         private readonly IRedisMapper _redisMapper;
         private readonly ILogger<TutorialCleanupService> _logger;
 
-        public static readonly TimeSpan GracePeriod = TimeSpan.FromMinutes(5);
-        private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(60);
+        public static readonly TimeSpan GracePeriod = TimeSpan.FromMinutes(30);
+        private static readonly TimeSpan CheckInterval = TimeSpan.FromMinutes(15);
 
         public TutorialCleanupService(
             ITutorialSessionRepository sessionRepo,
@@ -40,6 +40,8 @@ namespace CleanArchitecture.Application.Service
             while (!stoppingToken.IsCancellationRequested)
             {
                 await Task.Delay(CheckInterval, stoppingToken);
+
+                _logger.LogInformation("🔄 Cleanup tick at {Time}", DateTimeOffset.UtcNow);
 
                 try
                 {
@@ -62,10 +64,8 @@ namespace CleanArchitecture.Application.Service
                 try
                 {
                     var disconnectTime = await _sessionRepo.GetDisconnectTimeAsync(playerId);
-
                     if (disconnectTime == null)
                     {
-                        // Không có timestamp → dọn khỏi danh sách
                         await _sessionRepo.RemoveDisconnectDataAsync(playerId);
                         continue;
                     }
@@ -73,13 +73,15 @@ namespace CleanArchitecture.Application.Service
                     var elapsed = DateTimeOffset.UtcNow - disconnectTime.Value;
                     if (elapsed < GracePeriod) continue;
 
-                    // Quá grace period → xóa toàn bộ session
-                    var roomCode = TutorialSplendorService.GetRoomCode(playerId);
+                    // Lấy roomCode từ Redis thay vì in-memory
+                    var roomCode = await _sessionRepo.GetRoomCodeAsync(playerId);
+                    if (string.IsNullOrEmpty(roomCode))
+                    {
+                        _logger.LogWarning("RoomCode not found in Redis for {PlayerId}, skip game delete", playerId);
+                        await _sessionRepo.RemoveDisconnectDataAsync(playerId);
+                        continue;
+                    }
 
-                    // Xóa song song tất cả — DeleteGameContext đã cover game:* keys
-                    // DeleteGame gọi thêm để chắc chắn (idempotent)
-                    // DeleteStepAsync PHẢI chạy cùng lúc — nếu step còn mà game mất
-                    //   → reconnect sẽ thấy step cũ với board mới (bug)
                     await Task.WhenAll(
                         _stateStore.DeleteGameContext(roomCode),
                         _redisMapper.DeleteGame(roomCode),

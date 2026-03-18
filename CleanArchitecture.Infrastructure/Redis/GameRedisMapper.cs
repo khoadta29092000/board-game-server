@@ -60,10 +60,8 @@ namespace CleanArchitecture.Infrastructure.Redis
                 winnerId = session.WinnerId
             };
 
-            await _redis.StringSetAsync(
-                $"game:{gameId}:info",
-                JsonSerializer.Serialize(info, _jsonOptions)
-            );
+            await _redis.StringSetAsync($"game:{gameId}:info",JsonSerializer.Serialize(info, _jsonOptions),expiry: TimeSpan.FromHours(1));
+
         }
 
         // ============== game:{gameId}:players (Hash) ==============
@@ -110,6 +108,10 @@ namespace CleanArchitecture.Infrastructure.Redis
             if (entries.Any())
             {
                 await _redis.HashSetAsync($"game:{gameId}:players", entries.ToArray());
+                await _redis.KeyExpireAsync(                        
+                    $"game:{gameId}:players",
+                    TimeSpan.FromHours(1)
+                );
             }
         }
 
@@ -158,7 +160,8 @@ namespace CleanArchitecture.Infrastructure.Redis
 
             await _redis.StringSetAsync(
                 $"game:{gameId}:board",
-                JsonSerializer.Serialize(boardData, _jsonOptions)
+                JsonSerializer.Serialize(boardData, _jsonOptions),
+                expiry: TimeSpan.FromHours(1)
             );
         }
 
@@ -185,7 +188,8 @@ namespace CleanArchitecture.Infrastructure.Redis
 
             await _redis.StringSetAsync(
                 $"game:{gameId}:turn",
-                JsonSerializer.Serialize(turnData, _jsonOptions)
+                JsonSerializer.Serialize(turnData, _jsonOptions),
+                expiry: TimeSpan.FromHours(1)
             );
         }
 

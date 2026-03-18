@@ -25,14 +25,14 @@ namespace Splendor_Game_Server.Hubs
             IRedisMapper redisMapper,
             IUserConnectionService userConnectionService,
             IGameHistoryService historyService,
-            IKeyedServiceProvider keyedServices,
+            IServiceProvider serviceProvider,
             ILogger<GameHub> logger)
         {
             _gameService = gameService;
             _redisMapper = redisMapper;
             _userConnectionService = userConnectionService;
             _historyService = historyService;
-            _botService = keyedServices.GetRequiredKeyedService<IBotService>("ai");
+            _botService = serviceProvider.GetRequiredKeyedService<IBotService>("ai");
             _logger = logger;
         }
 

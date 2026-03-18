@@ -128,7 +128,7 @@ namespace CleanArchitecture.Application.Service
             RoomValidators.ValidateRoomExists(room, roomId);
             RoomValidators.ValidateRoomCapacity(room!);
 
-            return await _roomRepository.JoinRoom(roomId, botId, botName);
+            return await _roomRepository.AddBotToRoom(roomId, botId, botName);
         }
         public async Task<bool> DeleteRoom(string roomId)
         {

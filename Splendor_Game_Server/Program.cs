@@ -252,12 +252,17 @@ builder.Services.AddSingleton<IGameHistoryRepository, GameHistoryRepository>();
 builder.Services.AddSingleton<IGameHistoryService, GameHistoryService>();
 builder.Services.AddSingleton<ITutorialSplendorService, TutorialSplendorService>();
 builder.Services.AddSingleton<ITutorialSessionRepository, RedisTutorialSessionRepository>();
+builder.Services.AddSingleton<IGameNotifier, GameHubNotifier>();
 builder.Services.AddHostedService<TutorialCleanupService>();
 
-builder.Services.AddKeyedScoped<IBotService, BotService>("rule");
-builder.Services.AddKeyedScoped<IBotService, LangChainBotService>("ai");
-builder.Services.AddHttpClient<LangChainBotService>(c =>
-    c.BaseAddress = new Uri(builder.Configuration["BotAgent:Url"]!));
+builder.Services.AddKeyedSingleton<IBotService, BotService>("rule");
+builder.Services.AddKeyedSingleton<IBotService, LangChainBotService>("ai");
+
+builder.Services.AddHttpClient("BotAgent", c =>
+{
+    c.BaseAddress = new Uri(builder.Configuration["BotAgent:Url"]!);
+    c.Timeout = TimeSpan.FromSeconds(180); // ← tăng lên 3 phút
+});
 
 
 builder.Services.AddMemoryCache();

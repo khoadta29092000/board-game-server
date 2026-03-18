@@ -171,7 +171,7 @@ namespace CleanArchitecture.Presentation.Hubs
                     roomId, playerId, playerName);
 
                 var room = await _roomService.JoinRoom(roomId, playerId, playerName);
-            
+
                 await HandlePlayerJoining(room, playerId);
 
                 await Clients.GroupExcept($"Room_{roomId}", Context.ConnectionId)
@@ -281,7 +281,7 @@ namespace CleanArchitecture.Presentation.Hubs
                 _logger.LogInformation("✅ Game started in room {RoomId}. Players: {Count}",
                     roomId, startedRoom.CurrentPlayers);
 
-                await Clients.Group($"Room_{roomId}").SendAsync("GameStarted", new { startedRoom, roomId});
+                await Clients.Group($"Room_{roomId}").SendAsync("GameStarted", new { startedRoom, roomId });
                 await Clients.Group("RoomList").SendAsync("RoomUpdated", startedRoom);
                 //await Clients.Group($"game:{roomId}").SendAsync("GameStarted", new
                 //{
@@ -396,31 +396,38 @@ namespace CleanArchitecture.Presentation.Hubs
             try
             {
                 var (playerId, _) = await GetValidatedPlayerInfo();
-
                 var userConnection = await _userConnectionService.GetUserByConnection(Context.ConnectionId);
                 if (userConnection?.RoomId == null)
                     throw new InvalidOperationException("You are not in any room");
 
                 var roomId = userConnection.RoomId;
+
+                _logger.LogInformation("[AddBot] Start — roomId={RoomId} playerId={PlayerId}", roomId, playerId);
+
                 var room = await _roomService.GetRoomById(roomId);
+
+                _logger.LogInformation("[AddBot] Room — status={Status} players={Current}/{Max}",
+                    room?.Status, room?.CurrentPlayers, room?.QuantityPlayer);
+
                 if (room == null) throw new InvalidOperationException("Room not found");
 
-                // Chỉ owner mới được add bot
                 var owner = room.Players?.FirstOrDefault(p => p.IsOwner);
+                _logger.LogInformation("[AddBot] Owner={OwnerId} RequestBy={PlayerId}", owner?.PlayerId, playerId);
+
                 if (owner?.PlayerId != playerId)
                     throw new UnauthorizedOperationException("Only room owner can add a bot");
 
-                var botId = $"BOT_{Guid.NewGuid():N}"; 
+                var botId = $"BOT_{Guid.NewGuid():N}";
                 var botName = "AI Bot";
 
-                // Kiểm tra bot chưa có trong room
-                if (room.Players?.Any(p => p.PlayerId.StartsWith("BOT_")) == true)
-                    return new { success = false, error = "Bot already in room" };
+                //if (room.Players?.Any(p => p.PlayerId.StartsWith("BOT_")) == true)
+                //    return new { success = false, error = "Bot already in room" };
 
-                // Add bot vào room (dùng JoinRoom của service)
+                _logger.LogInformation("[AddBot] Calling AddBotToRoom service...");
+
                 var updatedRoom = await _roomService.AddBotToRoom(roomId, botId, botName);
 
-                _logger.LogInformation("🤖 Bot {BotId} added to room {RoomId}", botId, roomId);
+                _logger.LogInformation("[AddBot] Result null={IsNull}", updatedRoom == null);
 
                 await Clients.Group($"Room_{roomId}").SendAsync("PlayerJoined", new
                 {
@@ -435,11 +442,14 @@ namespace CleanArchitecture.Presentation.Hubs
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "[AddBot] Exception: {Message}", ex.Message);
                 return await HandleHubError(ex, "Failed to add bot to room");
             }
         }
         private async Task<object> HandleHubError(Exception ex, string defaultMessage)
         {
+            _logger.LogError(ex, "Hub error: {Message} | Detail: {Detail}", ex.Message, ex.ToString());
+
             var errorMessage = ex switch
             {
                 RoomNotFoundException => "Room not found",
@@ -449,15 +459,12 @@ namespace CleanArchitecture.Presentation.Hubs
                 InsufficientPlayersException => ex.Message,
                 PlayerNotFoundException => "Player not found in room",
                 HubException => ex.Message,
-                InvalidOperationException => ex.Message,
+                InvalidOperationException => ex.Message, // ← cái này sẽ show message thật
                 ArgumentException => ex.Message,
                 _ => defaultMessage
             };
 
-            _logger.LogError(ex, "Hub error: {Message}", errorMessage);
-            //await Clients.Caller.SendAsync("Error", errorMessage);
             return new { success = false, error = errorMessage };
         }
-
     }
-}
+    }

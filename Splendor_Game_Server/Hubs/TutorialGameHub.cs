@@ -18,13 +18,13 @@ namespace CleanArchitecture.SignalR.Hubs
 
         public TutorialGameHub(
             ITutorialSplendorService tutorialService,
-            IKeyedServiceProvider keyedServices,  
+            IServiceProvider serviceProvider,
             IRedisMapper redisMapper,
             ITutorialSessionRepository sessionRepo,
             ILogger<TutorialGameHub> logger)
         {
             _tutorialService = tutorialService;
-            _botService = keyedServices.GetRequiredKeyedService<IBotService>("rule"); 
+            _botService = serviceProvider.GetRequiredKeyedService<IBotService>("rule");
             _redisMapper = redisMapper;
             _sessionRepo = sessionRepo;
             _logger = logger;

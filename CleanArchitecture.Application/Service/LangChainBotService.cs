@@ -14,7 +14,8 @@ namespace CleanArchitecture.Application.Service
         private readonly IGameStateStore _stateStore;
         private readonly IRedisMapper _redisMapper;
         private readonly ILogger<LangChainBotService> _logger;
-        private readonly HttpClient _http;
+        private readonly IHttpClientFactory _httpClientFactory;
+        private readonly IGameNotifier _notifier;
 
         public const string BOT_PREFIX = "BOT_";
 
@@ -23,30 +24,27 @@ namespace CleanArchitecture.Application.Service
             IGameStateStore stateStore,
             IRedisMapper redisMapper,
             ILogger<LangChainBotService> logger,
-            HttpClient http)
+            IHttpClientFactory httpClientFactory,
+            IGameNotifier notifier)
         {
             _splendorService = splendorService;
             _stateStore = stateStore;
             _redisMapper = redisMapper;
             _logger = logger;
-            _http = http;
+            _httpClientFactory = httpClientFactory;
+            _notifier = notifier;
         }
 
-        // =====================================================================
-        // ENTRY POINT
-        // =====================================================================
-        public async Task TakeTurnAsync(string roomCode, int delayMs = 10000)
+        public async Task TakeTurnAsync(string roomCode, int delayMs = 2000)
         {
             try
             {
                 await Task.Delay(delayMs);
 
-                // Verify vẫn đang là lượt bot
                 var context = await _stateStore.LoadGameContext(roomCode);
                 if (context == null) return;
 
                 var turnSystem = new TurnSystem();
-
                 var botId = turnSystem.GetCurrentPlayerId(context);
                 if (!botId.StartsWith(BOT_PREFIX))
                 {
@@ -54,7 +52,6 @@ namespace CleanArchitecture.Application.Service
                     return;
                 }
 
-                // Build game state giống BroadcastGameState để gửi cho agent
                 var redisState = await BuildGameStateAsync(roomCode);
                 if (redisState == null)
                 {
@@ -62,7 +59,6 @@ namespace CleanArchitecture.Application.Service
                     return;
                 }
 
-                // Gọi LangChain agent
                 var decision = await CallAgentAsync(redisState);
                 if (decision == null)
                 {
@@ -71,7 +67,6 @@ namespace CleanArchitecture.Application.Service
                 }
 
                 _logger.LogInformation("[LangChainBot] {Action} — {Reasoning}", decision.Action, decision.Reasoning);
-
                 await ExecuteDecisionAsync(roomCode, botId, decision);
             }
             catch (Exception ex)
@@ -80,9 +75,6 @@ namespace CleanArchitecture.Application.Service
             }
         }
 
-        // =====================================================================
-        // BUILD GAME STATE — dùng redisMapper giống BroadcastGameState
-        // =====================================================================
         private async Task<object?> BuildGameStateAsync(string roomCode)
         {
             var info = await _redisMapper.GetGameInfo(roomCode);
@@ -106,20 +98,14 @@ namespace CleanArchitecture.Application.Service
             };
         }
 
-        // =====================================================================
-        // GỌI LANGCHAIN SERVICE
-        // =====================================================================
         private async Task<AgentDecision?> CallAgentAsync(object redisState)
         {
-            var response = await _http.PostAsJsonAsync("/decide", new { gameState = redisState });
+            var http = _httpClientFactory.CreateClient("BotAgent");
+            var response = await http.PostAsJsonAsync("/decide", new { gameState = redisState });
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadFromJsonAsync<AgentDecision>();
         }
 
-        // =====================================================================
-        // EXECUTE — map AgentDecision → gọi đúng service method
-        // Giữ nguyên các case NeedsDiscard, NeedsSelectNoble từ BotService gốc
-        // =====================================================================
         private async Task ExecuteDecisionAsync(string roomCode, string botId, AgentDecision decision)
         {
             switch (decision.Action)
@@ -135,11 +121,29 @@ namespace CleanArchitecture.Application.Service
                         _logger.LogError("[LangChainBot] CollectGems failed");
                         return;
                     }
-                    // Xử lý discard nếu vượt 10 gems — dùng lại logic từ BotService
+                    // Broadcast trước để user thấy bot đã lấy gem
+                    await _notifier.BroadcastGameStateAsync(roomCode);
+
+                    // NeedsDiscard → gọi lại agent để bot tự quyết định bỏ gem nào
                     if (collectResult.NeedsDiscard)
                     {
-                        var toDiscard = CalculateDiscardGems(collectResult.CurrentGems);
-                        await _splendorService.DiscardGemsAsync(roomCode, botId, toDiscard);
+                        await _notifier.NotifyBotThinkingAsync(roomCode);
+                        var discardState = await BuildGameStateAsync(roomCode);
+                        var discardDecision = await CallAgentAsync(discardState!);
+                        if (discardDecision?.Action == "DISCARD_GEMS")
+                        {
+                            var toDiscard = discardDecision.Payload
+                                .GetProperty("gems")
+                                .Deserialize<Dictionary<GemColor, int>>()!;
+                            await _splendorService.DiscardGemsAsync(roomCode, botId, toDiscard);
+                        }
+                        else
+                        {
+                            // Fallback tự tính nếu agent không trả DISCARD_GEMS
+                            var toDiscard = CalculateDiscardGems(collectResult.CurrentGems);
+                            await _splendorService.DiscardGemsAsync(roomCode, botId, toDiscard);
+                        }
+                        await _notifier.BroadcastGameStateAsync(roomCode);
                     }
                     break;
 
@@ -152,11 +156,36 @@ namespace CleanArchitecture.Application.Service
                         _logger.LogError("[LangChainBot] PurchaseCard failed — cardId={CardId}", cardId);
                         return;
                     }
-                    // Chọn noble gây thiệt hại nhất cho opponent nếu eligible
+
+                    if (purchaseResult.IsGameOver)
+                    {
+                        await _notifier.NotifyGameOverAsync(roomCode, purchaseResult.Winner);
+                        return;
+                    }
+
+                    // Broadcast trước để user thấy bot đã mua card
+                    await _notifier.BroadcastGameStateAsync(roomCode);
+
+                    // NeedsSelectNoble → gọi lại agent để bot chọn noble
                     if (purchaseResult.NeedsSelectNoble && purchaseResult.EligibleNobles.Any())
                     {
-                        var bestNoble = PickMostDamagingNoble(roomCode, purchaseResult.EligibleNobles);
-                        await _splendorService.SelectNobleAsync(roomCode, botId, bestNoble);
+                        await _notifier.NotifyBotThinkingAsync(roomCode);
+                        var nobleState = await BuildGameStateAsync(roomCode);
+                        var nobleDecision = await CallAgentAsync(nobleState!);
+                        if (nobleDecision?.Action == "SELECT_NOBLE")
+                        {
+                            var selectedNobleId = Guid.Parse(nobleDecision.Payload.GetProperty("nobleId").GetString()!); 
+                            var selectedNoble = purchaseResult.EligibleNobles.Contains(selectedNobleId)
+                                ? selectedNobleId
+                                : purchaseResult.EligibleNobles.First();
+                            await _splendorService.SelectNobleAsync(roomCode, botId, selectedNoble);
+                        }
+                        else
+                        {
+                            // Fallback chọn noble đầu tiên
+                            await _splendorService.SelectNobleAsync(roomCode, botId, purchaseResult.EligibleNobles.First());
+                        }
+                        await _notifier.BroadcastGameStateAsync(roomCode);
                     }
                     break;
 
@@ -171,38 +200,53 @@ namespace CleanArchitecture.Application.Service
                         _logger.LogError("[LangChainBot] ReserveCard failed");
                         return;
                     }
+
+                    // Broadcast trước để user thấy bot đã reserve
+                    await _notifier.BroadcastGameStateAsync(roomCode);
+
+                    // NeedsDiscard → gọi lại agent
                     if (reserveResult.NeedsDiscard)
                     {
-                        var toDiscard = CalculateDiscardGems(reserveResult.CurrentGems);
-                        await _splendorService.DiscardGemsAsync(roomCode, botId, toDiscard);
+                        await _notifier.NotifyBotThinkingAsync(roomCode);
+                        var discardState = await BuildGameStateAsync(roomCode);
+                        var discardDecision = await CallAgentAsync(discardState!);
+                        if (discardDecision?.Action == "DISCARD_GEMS")
+                        {
+                            var toDiscard = discardDecision.Payload
+                                .GetProperty("gems")
+                                .Deserialize<Dictionary<GemColor, int>>()!;
+                            await _splendorService.DiscardGemsAsync(roomCode, botId, toDiscard);
+                        }
+                        else
+                        {
+                            var toDiscard = CalculateDiscardGems(reserveResult.CurrentGems);
+                            await _splendorService.DiscardGemsAsync(roomCode, botId, toDiscard);
+                        }
+                        await _notifier.BroadcastGameStateAsync(roomCode);
                     }
                     break;
-
+                case "SELECT_NOBLE":
+                    var nobleId = Guid.Parse(decision.Payload.GetProperty("nobleId").GetString()!);
+                    var selectNobleResult = await _splendorService.SelectNobleAsync(roomCode, botId, nobleId);
+                    if (selectNobleResult.IsGameOver)
+                        await _notifier.NotifyGameOverAsync(roomCode, selectNobleResult.Winner);
+                    else
+                        await _notifier.BroadcastGameStateAsync(roomCode);
+                    break;
                 case "PASS_TURN":
                     _logger.LogWarning("[LangChainBot] Agent decided PASS_TURN");
                     await _splendorService.EndTurnAsync(roomCode, botId);
+                    await _notifier.BroadcastGameStateAsync(roomCode);
                     break;
 
                 default:
                     _logger.LogWarning("[LangChainBot] Unknown action: {Action}", decision.Action);
                     await _splendorService.EndTurnAsync(roomCode, botId);
+                    await _notifier.BroadcastGameStateAsync(roomCode);
                     break;
             }
         }
 
-        // =====================================================================
-        // NOBLE: Chọn noble gây thiệt hại nhất — chặn opponent gần nhất
-        // =====================================================================
-        private Guid PickMostDamagingNoble(string roomCode, IEnumerable<Guid> eligibleNobles)
-        {
-            // TODO: load context nếu muốn tính toán opponent bonuses
-            // Hiện tại: chọn noble đầu tiên — đủ dùng cho tutorial bot
-            return eligibleNobles.First();
-        }
-
-        // =====================================================================
-        // DISCARD: Copy từ BotService gốc — bỏ gem nhiều nhất, giữ Gold cuối
-        // =====================================================================
         private Dictionary<GemColor, int> CalculateDiscardGems(Dictionary<GemColor, int> currentGems)
         {
             var toDiscard = new Dictionary<GemColor, int>();
@@ -227,8 +271,5 @@ namespace CleanArchitecture.Application.Service
         }
     }
 
-    // =====================================================================
-    // Response từ LangChain Node.js service
-    // =====================================================================
     record AgentDecision(string Action, System.Text.Json.JsonElement Payload, string Reasoning);
 }

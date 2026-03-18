@@ -9,6 +9,7 @@ namespace CleanArchitecture.Application.IRepository
         Task<Room?> GetRoomById(string roomId);
         Task<Room> CreateRoom(Room room);
         Task<Room?> JoinRoom(string roomId, string playerId, string playerName);
+        Task<Room?> AddBotToRoom(string roomId, string botId, string botName);
         Task<Room?> LeaveRoom(string roomId, string playerId);
         Task<Room> PlayerisReady(string roomId, string requestingPlayerId, bool isReady);
         Task<Room?> StartGame(string roomId);

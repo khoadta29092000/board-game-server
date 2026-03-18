@@ -19,7 +19,7 @@ namespace CleanArchitecture.Application.IService
         Task<Room> StartGame(string roomId, string requestingPlayerId);
         Task<Room?> UpdateRoomStatus(string roomId, RoomStatus status);
         Task<Room> UpdateRoomSettings(string roomId, string requestingPlayerId, int? maxPlayers, RoomType? roomType);
-       
+        Task<Room> AddBotToRoom(string roomId, string botId, string botName);
         Task<bool> DeleteRoom(string roomId);
     }
 }

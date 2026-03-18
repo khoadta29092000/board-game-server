@@ -33,12 +33,15 @@ builder.Services.Configure<DatabaseSettings>(
 builder.Configuration.GetSection("DatabaseSettings"));
 
 // CORS
-builder.Services.AddCors(c =>
+builder.Services.AddCors(options =>
 {
-    c.AddPolicy("AllowOrigin", options =>
-        options.AllowAnyOrigin()
-               .AllowAnyMethod()
-               .AllowAnyHeader());
+    options.AddPolicy("OpenCors", policy =>
+    {
+        policy
+            .AllowAnyOrigin()
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
 });
 
 // Controllers
@@ -248,9 +251,19 @@ builder.Services.AddSingleton<IRoomRepository, RoomRepository>();
 builder.Services.AddSingleton<IGameHistoryRepository, GameHistoryRepository>();
 builder.Services.AddSingleton<IGameHistoryService, GameHistoryService>();
 builder.Services.AddSingleton<ITutorialSplendorService, TutorialSplendorService>();
-builder.Services.AddSingleton<IBotService, BotService>();
 builder.Services.AddSingleton<ITutorialSessionRepository, RedisTutorialSessionRepository>();
+builder.Services.AddSingleton<IGameNotifier, GameHubNotifier>();
 builder.Services.AddHostedService<TutorialCleanupService>();
+
+builder.Services.AddKeyedSingleton<IBotService, BotService>("rule");
+builder.Services.AddKeyedSingleton<IBotService, LangChainBotService>("ai");
+
+builder.Services.AddHttpClient("BotAgent", c =>
+{
+    c.BaseAddress = new Uri(builder.Configuration["BotAgent:Url"]!);
+    c.Timeout = TimeSpan.FromSeconds(180); // ← tăng lên 3 phút
+});
+
 
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<IUserConnectionService, UserConnectionService>();
@@ -419,12 +432,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseRouting();
 
-app.UseCors(policy => policy
-    .AllowAnyHeader()
-    .AllowAnyMethod()
-    .AllowCredentials()
-    .SetIsOriginAllowed(_ => true)
-);
+app.UseCors("OpenCors");
 
 //app.UseHttpsRedirection();
 app.UseAuthentication();

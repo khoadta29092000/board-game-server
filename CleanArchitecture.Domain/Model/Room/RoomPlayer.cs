@@ -9,7 +9,7 @@ namespace CleanArchitecture.Domain.Model.Room
     public class RoomPlayer
     {
         [BsonElement("playerId")]
-        [BsonRepresentation(BsonType.ObjectId)]
+        [BsonRepresentation(BsonType.String)]
         [Key("playerId")]
         [JsonPropertyName("playerId")]
         public string PlayerId { get; set; }

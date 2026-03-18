@@ -122,7 +122,14 @@ namespace CleanArchitecture.Application.Service
         {
             return await _roomRepository.UpdateRoomStatus(roomId, status);
         }
+        public async Task<Room> AddBotToRoom(string roomId, string botId, string botName)
+        {
+            var room = await _roomRepository.GetRoomById(roomId);
+            RoomValidators.ValidateRoomExists(room, roomId);
+            RoomValidators.ValidateRoomCapacity(room!);
 
+            return await _roomRepository.AddBotToRoom(roomId, botId, botName);
+        }
         public async Task<bool> DeleteRoom(string roomId)
         {
             return await _roomRepository.DeleteRoom(roomId);

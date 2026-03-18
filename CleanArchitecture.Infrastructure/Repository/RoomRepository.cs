@@ -48,7 +48,45 @@ namespace CleanArchitecture.Infrastructure.Repository
             await _roomsCollection.InsertOneAsync(room);
             return room;
         }
+        public async Task<Room> AddBotToRoom(string roomId, string botId, string botName)
+        {
+            var currentRoom = await GetRoomById(roomId);
 
+            // Debug
+            Console.WriteLine($"[AddBot] roomId={roomId}");
+            Console.WriteLine($"[AddBot] currentRoom null={currentRoom == null}");
+            Console.WriteLine($"[AddBot] status={currentRoom?.Status}");
+            Console.WriteLine($"[AddBot] currentPlayers={currentRoom?.CurrentPlayers}");
+            Console.WriteLine($"[AddBot] quantityPlayer={currentRoom?.QuantityPlayer}");
+
+            var filter = Builders<Room>.Filter.And(
+                Builders<Room>.Filter.Eq(r => r.Id, roomId),
+                Builders<Room>.Filter.Eq(r => r.Status, RoomStatus.Waiting),
+                Builders<Room>.Filter.Lt(r => r.CurrentPlayers, currentRoom?.QuantityPlayer)
+            );
+
+            var update = Builders<Room>.Update.Combine(
+                Builders<Room>.Update.Push(r => r.Players, new RoomPlayer
+                {
+                    PlayerId = botId,
+                    Name = botName,
+                    IsOwner = false,
+                    isReady = true
+                }),
+                Builders<Room>.Update.Inc(r => r.CurrentPlayers, 1)
+            );
+
+            var result = await _roomsCollection.FindOneAndUpdateAsync(
+                filter,
+                update,
+                new FindOneAndUpdateOptions<Room> { ReturnDocument = ReturnDocument.After }
+            );
+            if (result == null)
+                throw new InvalidOperationException($"AddBotToRoom failed — roomId={roomId}, status={currentRoom?.Status}, players={currentRoom?.CurrentPlayers}/{currentRoom?.QuantityPlayer}");
+
+            Console.WriteLine($"[AddBot] result null={result == null}");
+            return result;
+        }
         // Atomic join operation để tránh race condition
         public async Task<Room> JoinRoom(string roomId, string playerId, string playerName)
         {

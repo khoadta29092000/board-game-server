@@ -9,7 +9,9 @@
         /// <summary>
         /// Ghi nhận player vừa disconnect. Lưu timestamp để tính grace period.
         /// </summary>
-        Task MarkDisconnectedAsync(string playerId);
+        Task MarkDisconnectedAsync(string playerId, string roomCode);
+        Task SaveRoomCodeAsync(string playerId, string roomCode);
+        Task<string?> GetRoomCodeAsync(string playerId);
 
         /// <summary>
         /// Xóa disconnect mark khi player reconnect trong grace period.
@@ -45,5 +47,7 @@
         /// Xóa step data (khi tutorial kết thúc hoặc cleanup).
         /// </summary>
         Task DeleteStepAsync(string playerId);
+
+
     }
 }

@@ -3,11 +3,12 @@ using CleanArchitecture.Application.IService;
 using CleanArchitecture.Application.Service;
 using CleanArchitecture.Domain.Model.Splendor.Enum;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.Logging;
+using Microsoft.AspNetCore.Authorization;
 using System.Text.Json;
 
 namespace CleanArchitecture.SignalR.Hubs
 {
+    [Authorize]
     public class TutorialGameHub : Hub
     {
         private readonly ITutorialSplendorService _tutorialService;
@@ -60,6 +61,7 @@ namespace CleanArchitecture.SignalR.Hubs
             try
             {
                 var roomCode = TutorialSplendorService.GetRoomCode(playerId);
+                //await _sessionRepo.SaveRoomCodeAsync(playerId, roomCode);
                 await Groups.AddToGroupAsync(Context.ConnectionId, roomCode);
                 await _sessionRepo.ClearDisconnectMarkAsync(playerId);
 
@@ -403,29 +405,45 @@ namespace CleanArchitecture.SignalR.Hubs
         // DISCONNECT: Ghi timestamp, KHÔNG xóa Redis
         // TutorialCleanupService sẽ xóa sau 5 phút nếu không reconnect
         // =====================================================================
+        public override async Task OnConnectedAsync()
+        {
+            var playerId = Context.GetHttpContext()?.Request.Query["playerId"].ToString();
+
+            if (string.IsNullOrEmpty(playerId))
+                playerId = Context.User?.FindFirst("Id")?.Value;
+
+            if (!string.IsNullOrEmpty(playerId))
+                Context.Items["playerId"] = playerId;  // lưu vào context
+
+            await base.OnConnectedAsync();
+        }
         public override async Task OnDisconnectedAsync(Exception? exception)
         {
             try
             {
-                // playerId truyền qua query string khi connect hub
-                // VD: connection.withUrl("/tutorialHub?playerId=xxx")
-                var playerId = Context.GetHttpContext()?.Request.Query["playerId"].ToString();
+                // Đọc từ Context.Items — luôn có dù query string bị mất
+                var playerId = Context.Items["playerId"]?.ToString();
+                _logger.LogWarning("OnDisconnected: playerId={P}", playerId);
 
                 if (!string.IsNullOrEmpty(playerId))
                 {
-                    var context = await _tutorialService.GetTutorialStateAsync(playerId);
-                    if (context != null)
+                    var step = await _sessionRepo.LoadStepAsync(playerId);
+                    var roomCode = await _sessionRepo.GetRoomCodeAsync(playerId);
+
+                    _logger.LogWarning("OnDisconnected: step={Step}, roomCode={Room}",
+                        step?.stepIndex, roomCode);
+
+                    if (step != null && !string.IsNullOrEmpty(roomCode))
                     {
-                        // Session còn → đánh dấu disconnect, chờ reconnect
-                        await _sessionRepo.MarkDisconnectedAsync(playerId);
+                        await _sessionRepo.MarkDisconnectedAsync(playerId, roomCode);
+                        _logger.LogInformation("Marked disconnect: {PlayerId}, room={Room}", playerId, roomCode);
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Swallow — không để disconnect handler crash app
+                _logger.LogError(ex, "OnDisconnected error");
             }
-
             await base.OnDisconnectedAsync(exception);
         }
     }

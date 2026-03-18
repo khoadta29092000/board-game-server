@@ -32,7 +32,7 @@ namespace CleanArchitecture.Infrastructure.Repository
         public async Task SaveGameContext(string roomCode, GameContext context)
         {
             var json = JsonSerializer.Serialize(context, _jsonOptions);
-            await _db.StringSetAsync($"splendor:game:{roomCode}", json);
+            await _db.StringSetAsync($"splendor:game:{roomCode}",json,expiry: TimeSpan.FromHours(1));
         }
 
         public async Task<GameContext?> LoadGameContext(string roomCode)

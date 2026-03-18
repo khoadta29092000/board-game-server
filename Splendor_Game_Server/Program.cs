@@ -330,28 +330,27 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             {
                 var accessToken = context.Request.Query["access_token"];
                 var path = context.HttpContext.Request.Path;
-
-                // Support both roomHub and gameHub
                 if (!string.IsNullOrEmpty(accessToken) &&
                     (path.StartsWithSegments("/roomHub") ||
-                     path.StartsWithSegments("/gameHub")))
+                     path.StartsWithSegments("/gameHub") ||
+                     path.StartsWithSegments("/tutorialGameHub")))
                 {
                     context.Token = accessToken;
                 }
                 return Task.CompletedTask;
             },
+
             OnAuthenticationFailed = context =>
             {
-                context.NoResult();
-                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                context.Response.ContentType = "application/json";
-
-                var error = context.Exception is SecurityTokenExpiredException
-                    ? "{\"error\":\"TokenExpired\"}"
-                    : "{\"error\":\"InvalidToken\"}";
-
-                return context.Response.WriteAsync(error);
+                // Không set response ở đây — để OnChallenge xử lý
+                // Chỉ NoResult để pipeline tiếp tục
+                if (context.Exception is SecurityTokenExpiredException)
+                {
+                    context.Response.Headers["Token-Expired"] = "true";
+                }
+                return Task.CompletedTask;
             },
+
             OnChallenge = context =>
             {
                 if (!context.Response.HasStarted)
@@ -359,7 +358,12 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                     context.HandleResponse();
                     context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                     context.Response.ContentType = "application/json";
-                    return context.Response.WriteAsync("{\"error\":\"Unauthorized\"}");
+
+                    var error = context.Response.Headers["Token-Expired"] == "true"
+                        ? "{\"error\":\"TokenExpired\"}"
+                        : "{\"error\":\"Unauthorized\"}";
+
+                    return context.Response.WriteAsync(error);
                 }
                 return Task.CompletedTask;
             }

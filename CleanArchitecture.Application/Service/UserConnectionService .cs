@@ -88,6 +88,22 @@ namespace CleanArchitecture.Application.Service
             return await Task.FromResult(connections);
         }
 
+        public async Task<UserConnection?> GetConnectionByPlayerId(string playerId)
+        {
+            var connectionIds = _cache.Get<List<string>>($"{USER_PREFIX}{playerId}");
+            if (connectionIds == null || !connectionIds.Any())
+                return null;
+
+            // Lấy connection đầu tiên còn active
+            foreach (var connectionId in connectionIds)
+            {
+                var connection = _cache.Get<UserConnection>($"{CONNECTION_PREFIX}{connectionId}");
+                if (connection != null)
+                    return connection;
+            }
+            return null;
+        }
+
         public async Task<UserConnection?> GetUserByConnection(string connectionId)
         {
             var connection = _cache.Get<UserConnection>($"{CONNECTION_PREFIX}{connectionId}");

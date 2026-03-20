@@ -292,14 +292,12 @@ namespace CleanArchitecture.Presentation.Hubs
                 //remove all players from room group since game has started
                 foreach (var player in startedRoom.Players)
                 {
-                    var userConn = await _userConnectionService.GetUserByConnection(player.PlayerId);
-                    if (userConn?.ConnectionId != null)
+                    var connections = await _userConnectionService.GetUserConnections(player.PlayerId);
+                    foreach (var connId in connections)
                     {
-                        _logger.LogInformation("🚪 Auto removing player {PlayerId} from room {RoomId} due to disconnect",
-                            userConn.PlayerId, userConn.RoomId);
-
-                        await Groups.RemoveFromGroupAsync(userConn.ConnectionId, $"Room_{roomId}");
+                        await Groups.RemoveFromGroupAsync(connId, $"Room_{roomId}");
                     }
+                    await _userConnectionService.RemoveUserFromRoom(player.PlayerId, roomId);
                 }
 
                 await _userConnectionService.RemoveConnection(Context.ConnectionId);

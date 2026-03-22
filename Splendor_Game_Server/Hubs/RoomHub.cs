@@ -418,8 +418,11 @@ namespace CleanArchitecture.Presentation.Hubs
                 var botId = $"BOT_{Guid.NewGuid():N}";
                 var botName = "AI Bot";
 
-                //if (room.Players?.Any(p => p.PlayerId.StartsWith("BOT_")) == true)
-                //    return new { success = false, error = "Bot already in room" };
+                if (room.Players?.Any(p => p.PlayerId.StartsWith("BOT_")) == true)
+                    return new { success = false, error = "Bot already in room" };
+
+                if (room.CurrentPlayers >= room.QuantityPlayer)
+                    return new { success = false, error = "Room is full" };
 
                 _logger.LogInformation("[AddBot] Calling AddBotToRoom service...");
 

@@ -9,7 +9,7 @@ namespace CleanArchitecture.Application.Service
         private readonly IMemoryCache _cache;
         private readonly string CONNECTION_PREFIX = "conn:";
         private readonly string USER_PREFIX = "user:";
-
+        private readonly string GRACE_PREFIX = "grace:";
         public UserConnectionService(IMemoryCache cache)
         {
             _cache = cache;

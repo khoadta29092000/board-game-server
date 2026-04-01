@@ -26,6 +26,16 @@ namespace CleanArchitecture.Domain.Model.Room
         [JsonPropertyName("roomType")]
         public RoomType RoomType { get; set; } = RoomType.Public;
 
+        [BsonElement("password")]
+        [Key("password")]
+        [JsonPropertyName("password")]
+        public string? Password { get; set; } = null;
+
+        [BsonElement("gameName")]
+        [Key("gameName")]
+        [JsonPropertyName("gameName")]
+        public string GameName { get; set; } = string.Empty;
+
         [BsonElement("quantityPlayer")]
         [Key("quantityPlayer")]
         [JsonPropertyName("quantityPlayer")]

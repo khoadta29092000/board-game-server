@@ -30,10 +30,7 @@ namespace CleanArchitecture.Infrastructure.Repository
 
         public async Task<List<Room>> GetActiveRooms()
         {
-            var filter = Builders<Room>.Filter.And(
-                Builders<Room>.Filter.Eq(r => r.Status, RoomStatus.Waiting),
-                Builders<Room>.Filter.Eq(r => r.RoomType, RoomType.Public)
-            );
+            var filter = Builders<Room>.Filter.Eq(r => r.Status, RoomStatus.Waiting);
             return await _roomsCollection.Find(filter).ToListAsync();
         }
 

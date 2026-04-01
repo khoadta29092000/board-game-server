@@ -252,7 +252,10 @@ builder.Services.AddSingleton<IGameHistoryRepository, GameHistoryRepository>();
 builder.Services.AddSingleton<IGameHistoryService, GameHistoryService>();
 builder.Services.AddSingleton<ITutorialSplendorService, TutorialSplendorService>();
 builder.Services.AddSingleton<ITutorialSessionRepository, RedisTutorialSessionRepository>();
+builder.Services.AddSingleton<IGameStateRepository, GameStateRepository>();
+builder.Services.AddSingleton<IGameStateService, GameStateService>();
 builder.Services.AddSingleton<IGameNotifier, GameHubNotifier>();
+
 builder.Services.AddHostedService<TutorialCleanupService>();
 
 builder.Services.AddKeyedSingleton<IBotService, BotService>("rule");

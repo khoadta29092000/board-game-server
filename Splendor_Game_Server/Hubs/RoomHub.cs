@@ -1,5 +1,7 @@
 ﻿using CleanArchitecture.Application.IRepository;
 using CleanArchitecture.Application.IService;
+using CleanArchitecture.Application.Service;
+using CleanArchitecture.Domain.DTO.Room;
 using CleanArchitecture.Domain.Exceptions;
 using CleanArchitecture.Domain.Model.Player;
 using CleanArchitecture.Domain.Model.Room;
@@ -8,6 +10,8 @@ using GraphQLParser;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using MongoDB.Bson;
+using System.Text.Json.Serialization;
+using static ServiceStack.Diagnostics.Events;
 
 namespace CleanArchitecture.Presentation.Hubs
 {
@@ -18,15 +22,17 @@ namespace CleanArchitecture.Presentation.Hubs
         private readonly IUserConnectionService _userConnectionService;
         private readonly ILogger<RoomHub> _logger;
         private readonly ISplendorService _gameService;
+        private readonly IGameStateService _gameStateService;
         private readonly IRedisMapper _redisMapper;
 
-        public RoomHub(IRoomService roomService, IUserConnectionService userConnectionService, ILogger<RoomHub> logger, ISplendorService gameService, IRedisMapper redisMapper)
+        public RoomHub(IRoomService roomService, IUserConnectionService userConnectionService, ILogger<RoomHub> logger, ISplendorService gameService, IRedisMapper redisMapper, IGameStateService gameStateService)
         {
             _roomService = roomService;
             _userConnectionService = userConnectionService;
             _logger = logger;
             _gameService = gameService;
             _redisMapper = redisMapper;
+            _gameStateService = gameStateService;
         }
 
         private (string? playerId, string? playerName) GetPlayerInfo()
@@ -53,6 +59,20 @@ namespace CleanArchitecture.Presentation.Hubs
             await base.OnConnectedAsync();
         }
 
+        private async Task AutoLeaveRoom()
+        {
+            var userConnection = await _userConnectionService.GetUserByConnection(Context.ConnectionId);
+            if (userConnection?.RoomId != null)
+            {
+                _logger.LogInformation("🚪 Auto removing player {PlayerId} from room {RoomId} due to disconnect",
+                    userConnection.PlayerId, userConnection.RoomId);
+
+                var (_, playerName) = GetPlayerInfo();
+                await HandlePlayerLeaving(userConnection.RoomId, userConnection.PlayerId, "disconnected", playerName);
+            }
+        }
+
+
         public override async Task OnDisconnectedAsync(Exception? exception)
         {
             try
@@ -67,23 +87,9 @@ namespace CleanArchitecture.Presentation.Hubs
             {
                 _logger.LogError(ex, "Error handling disconnect for {ConnectionId}", Context.ConnectionId);
             }
+
             await base.OnDisconnectedAsync(exception);
         }
-
-        private async Task AutoLeaveRoom()
-        {
-            var userConnection = await _userConnectionService.GetUserByConnection(Context.ConnectionId);
-            if (userConnection?.RoomId != null)
-            {
-                _logger.LogInformation("🚪 Auto removing player {PlayerId} from room {RoomId} due to disconnect",
-                    userConnection.PlayerId, userConnection.RoomId);
-
-                // Get player name for disconnect notification
-                var (_, playerName) = GetPlayerInfo();
-                await HandlePlayerLeaving(userConnection.RoomId, userConnection.PlayerId, "disconnected", playerName);
-            }
-        }
-
         public async Task JoinRoomListGroup()
         {
             try
@@ -170,25 +176,100 @@ namespace CleanArchitecture.Presentation.Hubs
             }
         }
 
-        public async Task<object> JoinRoom(string roomId)
+        public async Task<object> CreateSettingRoom(CreateRoomDto dto)
+        {
+            try
+            {
+                var (playerId, playerName) = await GetValidatedPlayerInfo();
+                _logger.LogInformation("➡️ CreateRoom called by {PlayerId} - {PlayerName}", playerId, playerName);
+
+                // Validate game exists and get player options
+                var availableGames = await _gameStateService.GetAvailableGameNamesAsync();
+                if (!availableGames.ContainsKey(dto.GameName))
+                    return new { success = false, error = $"Game '{dto.GameName}' does not exist" };
+
+                // Validate quantity player
+                var playerOptions = availableGames[dto.GameName];
+                if (!playerOptions.Contains(dto.QuantityPlayer))
+                    return new { success = false, error = $"Game '{dto.GameName}' only supports {string.Join(", ", playerOptions)} players" };
+
+                if (dto.RoomType == RoomType.Private && string.IsNullOrWhiteSpace(dto.Password))
+                    return new { success = false, error = "Private room requires a password" };
+
+                var room = new Room
+                {
+                    Id = ObjectId.GenerateNewId().ToString(),
+                    RoomId = "room_" + playerName,
+                    GameName = dto.GameName,
+                    CurrentPlayers = 1,
+                    QuantityPlayer = dto.QuantityPlayer,
+                    Password = dto.RoomType == RoomType.Private ? dto.Password : null,
+                    Players = new List<RoomPlayer>
+            {
+                new RoomPlayer
+                {
+                    IsOwner = true,
+                    Name = playerName,
+                    PlayerId = playerId,
+                    isReady = false
+                }
+            },
+                    RoomType = dto.RoomType,
+                    Status = RoomStatus.Waiting
+                };
+
+                var createdRoom = await _roomService.CreateRoom(room);
+                await HandlePlayerJoining(createdRoom, playerId);
+
+                // Hide password before sending to clients
+                createdRoom.Password = null;
+
+                _logger.LogInformation("✅ Room created: {RoomId} by {PlayerName}", createdRoom.Id, playerName);
+                await Clients.Group("RoomList").SendAsync("RoomUpdated", createdRoom);
+
+                return new { room = createdRoom, success = true };
+            }
+            catch (Exception ex)
+            {
+                return await HandleHubError(ex, "Failed to create room");
+            }
+        }
+
+        public async Task<object> JoinRoom(JoinRoomDto dto)
         {
             try
             {
                 var (playerId, playerName) = await GetValidatedPlayerInfo();
                 _logger.LogInformation("➡️ JoinRoom {RoomId} called by {PlayerId} - {PlayerName}",
-                    roomId, playerId, playerName);
+                    dto.RoomId, playerId, playerName);
 
-                var room = await _roomService.JoinRoom(roomId, playerId, playerName);
+                var room = await _roomService.GetRoomById(dto.RoomId);
+                if (room == null)
+                    return new { success = false, error = "Room not found" };
 
+                var wasInRoom = room.Players.Any(p => p.PlayerId == playerId);
+
+                if (!wasInRoom && room.RoomType == RoomType.Private)
+                {
+                    if (string.IsNullOrWhiteSpace(dto.Password))
+                        return new { success = false, error = "This room requires a password" };
+
+                    if (room.Password != dto.Password)
+                        return new { success = false, error = "Incorrect password" };
+                }
+
+                room = await _roomService.JoinRoom(dto.RoomId, playerId, playerName);
                 await HandlePlayerJoining(room, playerId);
 
-                await Clients.GroupExcept($"Room_{roomId}", Context.ConnectionId)
-                     .SendAsync("PlayerJoined", new { playerId, playerName, room });
+                // Hide password before sending to clients
+                room.Password = null;
 
+                await Clients.GroupExcept($"Room_{dto.RoomId}", Context.ConnectionId)
+                    .SendAsync("PlayerJoined", new { playerId, playerName, room });
                 await Clients.Group("RoomList").SendAsync("RoomUpdated", room);
 
                 _logger.LogInformation("✅ Player {PlayerId} joined Room {RoomId}. Current players: {Count}",
-                    playerId, roomId, room.CurrentPlayers);
+                    playerId, dto.RoomId, room.CurrentPlayers);
 
                 return new { room, success = true };
             }
@@ -300,14 +381,12 @@ namespace CleanArchitecture.Presentation.Hubs
                 //remove all players from room group since game has started
                 foreach (var player in startedRoom.Players)
                 {
-                    var userConn = await _userConnectionService.GetUserByConnection(player.PlayerId);
-                    if (userConn?.ConnectionId != null)
+                    var connections = await _userConnectionService.GetUserConnections(player.PlayerId);
+                    foreach (var connId in connections)
                     {
-                        _logger.LogInformation("🚪 Auto removing player {PlayerId} from room {RoomId} due to disconnect",
-                            userConn.PlayerId, userConn.RoomId);
-
-                        await Groups.RemoveFromGroupAsync(userConn.ConnectionId, $"Room_{roomId}");
+                        await Groups.RemoveFromGroupAsync(connId, $"Room_{roomId}");
                     }
+                    await _userConnectionService.RemoveUserFromRoom(player.PlayerId, roomId);
                 }
 
                 await _userConnectionService.RemoveConnection(Context.ConnectionId);
@@ -428,8 +507,11 @@ namespace CleanArchitecture.Presentation.Hubs
                 var botId = $"BOT_{Guid.NewGuid():N}";
                 var botName = "AI Bot";
 
-                //if (room.Players?.Any(p => p.PlayerId.StartsWith("BOT_")) == true)
-                //    return new { success = false, error = "Bot already in room" };
+                if (room.Players?.Any(p => p.PlayerId.StartsWith("BOT_")) == true)
+                    return new { success = false, error = "Bot already in room" };
+
+                if (room.CurrentPlayers >= room.QuantityPlayer)
+                    return new { success = false, error = "Room is full" };
 
                 _logger.LogInformation("[AddBot] Calling AddBotToRoom service...");
 
@@ -475,4 +557,4 @@ namespace CleanArchitecture.Presentation.Hubs
             return new { success = false, error = errorMessage };
         }
     }
-    }
+}

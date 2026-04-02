@@ -9,7 +9,7 @@ namespace CleanArchitecture.Application.Service
         private readonly IMemoryCache _cache;
         private readonly string CONNECTION_PREFIX = "conn:";
         private readonly string USER_PREFIX = "user:";
-
+        private readonly string GRACE_PREFIX = "grace:";
         public UserConnectionService(IMemoryCache cache)
         {
             _cache = cache;
@@ -86,6 +86,22 @@ namespace CleanArchitecture.Application.Service
         {
             var connections = _cache.Get<List<string>>($"{USER_PREFIX}{playerId}") ?? new List<string>();
             return await Task.FromResult(connections);
+        }
+
+        public async Task<UserConnection?> GetConnectionByPlayerId(string playerId)
+        {
+            var connectionIds = _cache.Get<List<string>>($"{USER_PREFIX}{playerId}");
+            if (connectionIds == null || !connectionIds.Any())
+                return null;
+
+            // Lấy connection đầu tiên còn active
+            foreach (var connectionId in connectionIds)
+            {
+                var connection = _cache.Get<UserConnection>($"{CONNECTION_PREFIX}{connectionId}");
+                if (connection != null)
+                    return connection;
+            }
+            return null;
         }
 
         public async Task<UserConnection?> GetUserByConnection(string connectionId)

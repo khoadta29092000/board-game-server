@@ -30,10 +30,7 @@ namespace CleanArchitecture.Infrastructure.Repository
 
         public async Task<List<Room>> GetActiveRooms()
         {
-            var filter = Builders<Room>.Filter.And(
-                Builders<Room>.Filter.Eq(r => r.Status, RoomStatus.Waiting),
-                Builders<Room>.Filter.Eq(r => r.RoomType, RoomType.Public)
-            );
+            var filter = Builders<Room>.Filter.Eq(r => r.Status, RoomStatus.Waiting);
             return await _roomsCollection.Find(filter).ToListAsync();
         }
 
@@ -48,11 +45,11 @@ namespace CleanArchitecture.Infrastructure.Repository
             await _roomsCollection.InsertOneAsync(room);
             return room;
         }
+
         public async Task<Room> AddBotToRoom(string roomId, string botId, string botName)
         {
             var currentRoom = await GetRoomById(roomId);
 
-            // Debug
             Console.WriteLine($"[AddBot] roomId={roomId}");
             Console.WriteLine($"[AddBot] currentRoom null={currentRoom == null}");
             Console.WriteLine($"[AddBot] status={currentRoom?.Status}");
@@ -81,13 +78,14 @@ namespace CleanArchitecture.Infrastructure.Repository
                 update,
                 new FindOneAndUpdateOptions<Room> { ReturnDocument = ReturnDocument.After }
             );
+
             if (result == null)
                 throw new InvalidOperationException($"AddBotToRoom failed — roomId={roomId}, status={currentRoom?.Status}, players={currentRoom?.CurrentPlayers}/{currentRoom?.QuantityPlayer}");
 
             Console.WriteLine($"[AddBot] result null={result == null}");
             return result;
         }
-        // Atomic join operation để tránh race condition
+
         public async Task<Room> JoinRoom(string roomId, string playerId, string playerName)
         {
             var currentRoom = await GetRoomById(roomId);
@@ -126,14 +124,12 @@ namespace CleanArchitecture.Infrastructure.Repository
             var playerToRemove = room.Players?.FirstOrDefault(p => p.PlayerId == playerId);
             if (playerToRemove == null) return room;
 
-            // If last player, delete room
             if (room.CurrentPlayers <= 1)
             {
                 await DeleteRoom(roomId);
                 return null;
             }
 
-            // Remove player
             var filter = Builders<Room>.Filter.Eq(r => r.Id, roomId);
             var update = Builders<Room>.Update
                 .PullFilter(r => r.Players, p => p.PlayerId == playerId)
@@ -141,13 +137,20 @@ namespace CleanArchitecture.Infrastructure.Repository
 
             await _roomsCollection.UpdateOneAsync(filter, update);
 
-            // Transfer ownership if needed
             if (playerToRemove.IsOwner)
             {
                 await TransferOwnership(roomId, playerId);
             }
 
-            return await GetRoomById(roomId);
+            var updatedRoom = await GetRoomById(roomId);
+
+            if (updatedRoom == null || updatedRoom.Players?.All(p => p.PlayerId.StartsWith("BOT_")) == true)
+            {
+                await DeleteRoom(roomId);
+                return null;
+            }
+
+            return updatedRoom;
         }
 
         private async Task TransferOwnership(string roomId, string leavingPlayerId)
@@ -160,6 +163,7 @@ namespace CleanArchitecture.Infrastructure.Repository
             var ownerUpdate = Builders<Room>.Update.Set("Players.$.IsOwner", true);
             await _roomsCollection.UpdateOneAsync(ownerFilter, ownerUpdate);
         }
+
         public async Task<Room?> StartGame(string roomId)
         {
             var filter = Builders<Room>.Filter.Eq(r => r.Id, roomId);
@@ -212,17 +216,16 @@ namespace CleanArchitecture.Infrastructure.Repository
                 new FindOneAndUpdateOptions<Room> { ReturnDocument = ReturnDocument.After }
             );
         }
+
         public async Task<Room> PlayerisReady(string roomId, string playerId, bool isReady)
         {
             Console.WriteLine($"DEBUG - RoomId: {roomId}");
             Console.WriteLine($"DEBUG - PlayerId: {playerId}");
 
-            var playerObjectId = ObjectId.Parse(playerId);
-            Console.WriteLine($"DEBUG - PlayerObjectId: {playerObjectId}");
-
+            
             var filter = Builders<Room>.Filter.And(
                 Builders<Room>.Filter.Eq(r => r.Id, roomId),
-                Builders<Room>.Filter.Eq("players.playerId", playerObjectId)
+                Builders<Room>.Filter.Eq("players.playerId", playerId)
             );
 
             var update = Builders<Room>.Update.Set("players.$.isReady", isReady);

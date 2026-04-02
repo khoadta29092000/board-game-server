@@ -48,27 +48,23 @@ namespace CleanArchitecture.Infrastructure.Security
 
             return Convert.ToBase64String(hashedPasswordBytes);
         }
-        public string GenerateToken(Player acc)
+        public string GenerateToken(Player acc, int expireHours = 24)
         {
             var secretKey = configuration.GetSection("AppSettings").GetSection("SecretKey").Value;
-
             var jwtTokenHandler = new JwtSecurityTokenHandler();
-
             var secretKeyBytes = Encoding.UTF8.GetBytes(secretKey);
-
             var tokenDescription = new SecurityTokenDescriptor
             {
                 Subject = new ClaimsIdentity(new[]{
-                    new Claim("Email", acc.Username),
-                    new Claim("Id", acc.Id.ToString()),
-                    new Claim("Name", acc.Name),
-                    new Claim("TokenId", Guid.NewGuid().ToString()),
-                }),
-                Expires = DateTime.UtcNow.AddDays(1),
+            new Claim("Email", acc.Username),
+            new Claim("Id", acc.Id.ToString()),
+            new Claim("Name", acc.Name),
+            new Claim("TokenId", Guid.NewGuid().ToString()),
+        }),
+                Expires = DateTime.UtcNow.AddHours(expireHours), 
                 SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(secretKeyBytes), SecurityAlgorithms.HmacSha512Signature)
             };
             var token = jwtTokenHandler.CreateToken(tokenDescription);
-
             return jwtTokenHandler.WriteToken(token);
         }
         public string GenerateVerificationCode()

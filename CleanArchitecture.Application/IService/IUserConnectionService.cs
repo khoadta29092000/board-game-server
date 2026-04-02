@@ -8,6 +8,7 @@ namespace CleanArchitecture.Application.IService
         Task RemoveConnection(string connectionId);
         Task RemoveUserFromRoom(string playerId, string roomId);
         Task<List<string>> GetUserConnections(string playerId);
+        Task<UserConnection?> GetConnectionByPlayerId(string playerId);
         Task<UserConnection?> GetUserByConnection(string connectionId);
         Task<bool> IsUserInRoom(string playerId, string roomId);
         Task<List<string>> GetUsersInRoom(string roomId);

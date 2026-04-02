@@ -125,6 +125,14 @@ namespace CleanArchitecture.Presentation.Hubs
             }
         }
 
+        public async Task<object> GetRoomInfo(string roomId)
+        {
+            var room = await _roomService.GetRoomById(roomId);
+            if (room == null) return new { success = false, error = "Room not found" };
+            room.Password = null;
+            return new { success = true, room };
+        }
+
         public async Task<object> CreateRoom()
         {
             try

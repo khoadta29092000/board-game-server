@@ -207,7 +207,8 @@ namespace CleanArchitecture.Infrastructure.Redis
                 level = cardComp.Level,
                 points = cardComp.PrestigePoints,
                 bonusColor = cardComp.BonusColor.ToString(),
-                cost = cardComp.Cost
+                cost = cardComp.Cost,
+               imageUrl = cardComp.ImageUrl
             };
         }
 
@@ -221,7 +222,8 @@ namespace CleanArchitecture.Infrastructure.Redis
             {
                 nobleId = nobleId.ToString(),
                 points = nobleComp.PrestigePoints,
-                requirements = nobleComp.Requirements
+                requirements = nobleComp.Requirements,
+                imageUrl = nobleComp.ImageUrl
             };
         }
 

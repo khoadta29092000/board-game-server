@@ -30,6 +30,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<PackageReference Include="CloudinaryDotNet" Version="1.28.0" />
 		<PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.MessagePack" Version="8.0.8" />
 		<PackageReference Include="Microsoft.Extensions.Logging.AzureAppServices" Version="9.0.9" />
 		<PackageReference Include="ServiceStack.Redis" Version="8.8.0" />

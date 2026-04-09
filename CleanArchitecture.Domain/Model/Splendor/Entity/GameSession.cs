@@ -68,20 +68,19 @@ namespace CleanArchitecture.Domain.Model.Splendor.Entity
     public class CardEntity : SplendorEntities
     {
         public CardEntity() { }
-        public CardEntity(int level, int prestigePoints, GemColor bonusColor, Dictionary<GemColor, int> cost)
-        {
-            AddComponent(new CardComponent(level, prestigePoints, bonusColor, cost));
+        public CardEntity(int level, int prestigePoints, GemColor bonusColor, Dictionary<GemColor, int> cost, string imageUrl) { 
+            AddComponent(new CardComponent(level, prestigePoints, bonusColor, cost, imageUrl));
         }
     }
 
     public class NobleEntity : SplendorEntities
     {
-        public NobleEntity() { }
-        public NobleEntity(Dictionary<GemColor, int> requirements)
-        {
-            AddComponent(new NobleComponent(requirements));
-        }
+    public NobleEntity() { }
+    public NobleEntity(Dictionary<GemColor, int> requirements, string imageUrl) 
+    {
+        AddComponent(new NobleComponent(requirements, imageUrl)); 
     }
+}
 
     public class BoardEntity : SplendorEntities
     {

@@ -39,7 +39,9 @@ namespace CleanArchitecture.Infrastructure.Repository
                     kv => kv.Value.AsInt32
                 );
 
-                cards.Add(new CardEntity(level, prestige, bonus, cost));
+                var imageUrl = doc["imageUrl"].AsString;
+
+                cards.Add(new CardEntity(level, prestige, bonus, cost, imageUrl));
             }
 
             return cards;
@@ -59,8 +61,9 @@ namespace CleanArchitecture.Infrastructure.Repository
                     kv => (GemColor)Enum.Parse(typeof(GemColor), kv.Name, true),
                     kv => kv.Value.AsInt32
                 );
+                var imageUrl = nobleDoc["imageUrl"].AsString;
 
-                nobles.Add(new NobleEntity(reqs));
+                nobles.Add(new NobleEntity(reqs, imageUrl));
             }
 
             return nobles;

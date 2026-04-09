@@ -257,7 +257,7 @@ builder.Services.AddSingleton<IGameStateService, GameStateService>();
 builder.Services.AddSingleton<IGameNotifier, GameHubNotifier>();
 
 builder.Services.AddHostedService<TutorialCleanupService>();
-
+builder.Services.AddSingleton<ICloudinaryService, CloudinaryService>();
 builder.Services.AddKeyedSingleton<IBotService, BotService>("rule");
 builder.Services.AddKeyedSingleton<IBotService, LangChainBotService>("ai");
 

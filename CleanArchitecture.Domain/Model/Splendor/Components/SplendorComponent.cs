@@ -21,6 +21,7 @@ namespace CleanArchitecture.Domain.Model.Splendor.Components
         public Dictionary<GemColor, int> Bonuses { get; set; }
         public List<Guid> ReservedCards { get; set; }
         public List<Guid> PurchaseCards { get; set; }
+        public string imageUrl { get; set; } = string.Empty;
 
         // ⬇️ THÊM constructor rỗng
         [JsonConstructor]
@@ -33,6 +34,7 @@ namespace CleanArchitecture.Domain.Model.Splendor.Components
             Bonuses = new Dictionary<GemColor, int>();
             ReservedCards = new List<Guid>();
             PurchaseCards = new List<Guid>();
+            imageUrl = string.Empty;
         }
 
         public PlayerComponent(string playerId, string name)
@@ -67,8 +69,10 @@ namespace CleanArchitecture.Domain.Model.Splendor.Components
     {
         public int Level { get; set; }
         public int PrestigePoints { get; set; }
-        public GemColor BonusColor { get; set; }
+        public string ImageUrl { get; set; } = string.Empty;
+        public GemColor BonusColor { get; set; } 
         public Dictionary<GemColor, int> Cost { get; set; }
+        
 
         // ⬇️ THÊM constructor rỗng
         [JsonConstructor]
@@ -78,14 +82,16 @@ namespace CleanArchitecture.Domain.Model.Splendor.Components
             PrestigePoints = 0;
             BonusColor = GemColor.White;
             Cost = new Dictionary<GemColor, int>();
+            ImageUrl = string.Empty;
         }
 
-        public CardComponent(int level, int prestigePoints, GemColor bonusColor, Dictionary<GemColor, int> cost)
+        public CardComponent(int level, int prestigePoints, GemColor bonusColor, Dictionary<GemColor, int> cost, string imageUrl)
         {
             Level = level;
             PrestigePoints = prestigePoints;
             BonusColor = bonusColor;
             Cost = cost;
+            ImageUrl = imageUrl;
         }
     }
 
@@ -94,6 +100,7 @@ namespace CleanArchitecture.Domain.Model.Splendor.Components
     {
         public int PrestigePoints { get; set; }
         public Dictionary<GemColor, int> Requirements { get; set; }
+        public string ImageUrl { get; set; } = string.Empty;
 
         // ⬇️ THÊM constructor rỗng
         [JsonConstructor]
@@ -101,12 +108,14 @@ namespace CleanArchitecture.Domain.Model.Splendor.Components
         {
             PrestigePoints = 3;
             Requirements = new Dictionary<GemColor, int>();
+            ImageUrl = string.Empty;
         }
 
-        public NobleComponent(Dictionary<GemColor, int> requirements)
+        public NobleComponent(Dictionary<GemColor, int> requirements, string imageUrl) 
         {
             PrestigePoints = 3;
             Requirements = requirements;
+            ImageUrl = imageUrl;
         }
     }
 
